@@ -14,8 +14,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,7 @@ class AnswerResult:
     abstained: bool
     confidence_score: float = 0.0
     review_queued: bool = False
+    retrieved_chunk_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,7 +98,9 @@ class AnswerResult:
             "abstained": self.abstained,
             "confidence_score": self.confidence_score,
             "review_queued": self.review_queued,
+            "retrieved_chunk_ids": self.retrieved_chunk_ids,
         }
+
 
 
 def format_user_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
@@ -275,6 +279,7 @@ class AnswerEngine:
                 abstained=True,
                 confidence_score=norm_score,
                 review_queued=True,
+                retrieved_chunk_ids=[c.chunk_id for c in chunks],
             )
 
         # 4. Format prompt
@@ -313,6 +318,7 @@ class AnswerEngine:
                 abstained=True,
                 confidence_score=norm_score,
                 review_queued=True,
+                retrieved_chunk_ids=[c.chunk_id for c in chunks],
             )
 
         # 7. Parse citations and append disclaimer
@@ -326,4 +332,6 @@ class AnswerEngine:
             abstained=False,
             confidence_score=norm_score,
             review_queued=False,
+            retrieved_chunk_ids=[c.chunk_id for c in chunks],
         )
+
