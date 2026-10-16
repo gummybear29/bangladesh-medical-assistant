@@ -282,4 +282,4 @@ with gr.Blocks(title="Bangladesh Medical & First-Aid Assistant", css=custom_css)
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False)
+    demo.launch()
