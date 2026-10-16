@@ -30,7 +30,11 @@ from src.config import (
     RRF_K,
 )
 from src.llm.client import FakeLLMClient, GeminiClient, LLMClient, LLMServiceError
-from src.retrieval.hybrid import HybridRetriever, RetrievedChunk
+from src.retrieval.hybrid import (
+    HybridRetriever,
+    RetrievedChunk,
+    detect_drugs_in_query,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +106,6 @@ class AnswerResult:
         }
 
 
-
 def format_user_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
     """Format chunks into a secured context block with explicit data isolation."""
     chunk_blocks: list[str] = []
@@ -123,11 +126,11 @@ def normalize_rrf_score(max_score: float, k: int = RRF_K) -> float:
     return max(0.0, min(1.0, norm))
 
 
-def evaluate_confidence(norm_score: float) -> str:
-    """Classify normalized score into high / medium / low."""
-    if norm_score >= CONFIDENCE_HIGH:
+def evaluate_confidence(score: float) -> str:
+    """Classify vector similarity score into high / medium / low."""
+    if score >= CONFIDENCE_HIGH:
         return "high"
-    elif norm_score >= CONFIDENCE_MEDIUM:
+    elif score >= CONFIDENCE_MEDIUM:
         return "medium"
     return "low"
 
@@ -168,7 +171,7 @@ def parse_citations(text: str, chunks: list[RetrievedChunk]) -> list[SourceRef]:
         for c in chunks[:3]:
             key = (c.drug_name.strip().lower(), c.section.strip().lower())
             if key not in seen:
-                seen.add((key))
+                seen.add(key)
                 sources.append(SourceRef(drug=key[0], section=key[1], url=c.source_url))
 
     return sources
@@ -248,25 +251,48 @@ class AnswerEngine:
         # 1. Retrieve hybrid chunks
         chunks = self.retriever.retrieve(question_clean, top_k=top_k)
 
-        # 2. Evaluate retrieval confidence
-        raw_max_score = max((c.score for c in chunks), default=0.0)
-        norm_score = normalize_rrf_score(raw_max_score)
-        confidence = evaluate_confidence(norm_score)
+        # 2. Vector Cosine Similarity Gating Signal & Drug-Detection Check
+        top_sim = (
+            chunks[0].similarity
+            if (chunks and chunks[0].similarity > 0.0)
+            else max((c.similarity for c in chunks), default=0.0)
+        )
+        confidence_score = round(top_sim, 4)
+        confidence = evaluate_confidence(confidence_score)
 
-        # 3. Confidence Gating (Abstain if below threshold or empty chunks)
-        if not chunks or norm_score < self.abstain_threshold:
+        # Drug-detection check: if the query names a drug, top chunk must be from that drug
+        detected_drugs = detect_drugs_in_query(question_clean)
+        drug_mismatch = False
+        if detected_drugs and chunks:
+            detected_set = {d.lower() for d in detected_drugs}
+            top_drug = chunks[0].drug_name.lower()
+            if top_drug not in detected_set:
+                drug_mismatch = True
+
+        # 3. Confidence Gating (Abstain if below threshold, empty chunks, or drug mismatch)
+        if not chunks or confidence_score < self.abstain_threshold or drug_mismatch:
+            reason = (
+                "drug_detection_mismatch"
+                if drug_mismatch
+                else (
+                    "retrieval_confidence_below_threshold"
+                    if chunks
+                    else "no_chunks_retrieved"
+                )
+            )
             logger.info(
-                "Abstaining on question '%s': score=%.4f (threshold=%.4f)",
+                "Abstaining on question '%s': sim=%.4f (threshold=%.4f, reason=%s)",
                 question_clean,
-                norm_score,
+                confidence_score,
                 self.abstain_threshold,
+                reason,
             )
             append_review_queue(
                 queue_file=self.review_queue_file,
                 question=question_clean,
                 confidence="low",
-                confidence_score=norm_score,
-                reason="retrieval_confidence_below_threshold" if chunks else "no_chunks_retrieved",
+                confidence_score=confidence_score,
+                reason=reason,
                 chunks=chunks,
             )
             return AnswerResult(
@@ -277,7 +303,7 @@ class AnswerEngine:
                 ],
                 confidence="low",
                 abstained=True,
-                confidence_score=norm_score,
+                confidence_score=confidence_score,
                 review_queued=True,
                 retrieved_chunk_ids=[c.chunk_id for c in chunks],
             )
@@ -303,7 +329,7 @@ class AnswerEngine:
                 queue_file=self.review_queue_file,
                 question=question_clean,
                 confidence="low",
-                confidence_score=norm_score,
+                confidence_score=confidence_score,
                 reason="model_insufficient_evidence",
                 chunks=chunks,
             )
@@ -316,7 +342,7 @@ class AnswerEngine:
                 sources=sources,
                 confidence="low",
                 abstained=True,
-                confidence_score=norm_score,
+                confidence_score=confidence_score,
                 review_queued=True,
                 retrieved_chunk_ids=[c.chunk_id for c in chunks],
             )
@@ -330,7 +356,7 @@ class AnswerEngine:
             sources=sources,
             confidence=confidence,
             abstained=False,
-            confidence_score=norm_score,
+            confidence_score=confidence_score,
             review_queued=False,
             retrieved_chunk_ids=[c.chunk_id for c in chunks],
         )

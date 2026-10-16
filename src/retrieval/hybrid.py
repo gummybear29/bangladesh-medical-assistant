@@ -44,9 +44,12 @@ class RetrievedChunk:
     score: float
     vector_rank: int | None = None
     bm25_rank: int | None = None
+    similarity: float = 0.0
+    vector_similarity: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
 
 
 # ── RRF Scoring ────────────────────────────────────────────────────────
@@ -249,6 +252,7 @@ class HybridRetriever:
 
         # ── 1. Vector Search Leg ──────────────────────────────────────
         vector_ranks: dict[str, int] = {}
+        vector_similarities: dict[str, float] = {}
         try:
             raw_emb = self.embedding_model.encode([clean_query])
             q_emb = (
@@ -275,8 +279,20 @@ class HybridRetriever:
             )
 
             if v_res and "ids" in v_res and v_res["ids"]:
-                for rank, cid in enumerate(v_res["ids"][0], 1):
+                ids_list = v_res["ids"][0]
+                dists_list = (
+                    v_res.get("distances", [[]])[0]
+                    if "distances" in v_res and v_res["distances"]
+                    else []
+                )
+                for rank, cid in enumerate(ids_list, 1):
                     vector_ranks[cid] = rank
+                    if rank - 1 < len(dists_list):
+                        dist = dists_list[rank - 1]
+                        sim = max(0.0, min(1.0, 1.0 - (dist / 2.0)))
+                    else:
+                        sim = 0.0
+                    vector_similarities[cid] = sim
 
         except Exception as exc:
             logger.error("Vector search failed during hybrid retrieval: %s", exc)
@@ -334,7 +350,10 @@ class HybridRetriever:
             )
             scored_candidates.append((cid, score))
 
-        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+        scored_candidates.sort(
+            key=lambda x: (x[1], vector_similarities.get(x[0], 0.0)),
+            reverse=True,
+        )
 
         # ── 4. Build Output Models ────────────────────────────────────
         results: list[RetrievedChunk] = []
@@ -343,6 +362,7 @@ class HybridRetriever:
             if not meta:
                 continue
 
+            sim = vector_similarities.get(cid, 0.0)
             results.append(
                 RetrievedChunk(
                     chunk_id=cid,
@@ -354,6 +374,8 @@ class HybridRetriever:
                     score=score,
                     vector_rank=vector_ranks.get(cid),
                     bm25_rank=bm25_ranks.get(cid),
+                    similarity=sim,
+                    vector_similarity=sim,
                 )
             )
 
@@ -397,6 +419,7 @@ class HybridRetriever:
                         merged.append(r[i])
                         seen_ids.add(r[i].chunk_id)
 
+            merged.sort(key=lambda c: (c.score, c.similarity), reverse=True)
             return merged[:top_k]
         else:
             return self._retrieve_single(query, top_k=top_k, filter_drug=None)

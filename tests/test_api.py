@@ -29,6 +29,7 @@ def _make_dummy_chunk(
     drug_name: str = "metformin",
     section: str = "dosage",
     score: float = 0.032,
+    similarity: float = 0.85,
 ) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=chunk_id,
@@ -38,6 +39,8 @@ def _make_dummy_chunk(
         source_url="https://dailymed.nlm.nih.gov/test-metformin",
         chunk_index=0,
         score=score,
+        similarity=similarity,
+        vector_similarity=similarity,
     )
 
 
@@ -104,7 +107,7 @@ def test_ask_endpoint_happy_path(client_and_engine):
 def test_ask_endpoint_abstention(client_and_engine):
     client, engine, log_file = client_and_engine
     # Force low score below threshold
-    engine.retriever.retrieve.return_value = [_make_dummy_chunk(score=0.002)]
+    engine.retriever.retrieve.return_value = [_make_dummy_chunk(score=0.002, similarity=0.60)]
 
     res = client.post("/ask", json={"question": "Unknown compound dose?"})
     assert res.status_code == 200

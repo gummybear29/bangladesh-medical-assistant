@@ -13,7 +13,7 @@ from src.llm.client import FakeLLMClient
 from src.retrieval.hybrid import RetrievedChunk
 
 
-def _make_chunk(drug: str, section: str) -> RetrievedChunk:
+def _make_chunk(drug: str, section: str, similarity: float = 0.85) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=f"{drug}__{section}__0",
         text=f"Sample text for {drug} {section}.",
@@ -22,6 +22,8 @@ def _make_chunk(drug: str, section: str) -> RetrievedChunk:
         source_url="https://dailymed.nlm.nih.gov/test",
         chunk_index=0,
         score=0.032,
+        similarity=similarity,
+        vector_similarity=similarity,
     )
 
 

@@ -29,7 +29,7 @@ BM25_INDEX_FILE = DATA_DIR / "bm25_index.pkl"
 
 # ── LLM ────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 LLM_MAX_RETRIES = 3
 
 # ── Retrieval ──────────────────────────────────────────────────────────
@@ -37,9 +37,9 @@ RETRIEVAL_TOP_K = 5
 RRF_K = 60  # Reciprocal Rank Fusion constant
 
 # ── Confidence thresholds ──────────────────────────────────────────────
-CONFIDENCE_HIGH = 0.45
-CONFIDENCE_MEDIUM = 0.25
-CONFIDENCE_ABSTAIN_THRESHOLD = 0.25  # below this normalized score → abstain
+CONFIDENCE_HIGH = 0.80
+CONFIDENCE_MEDIUM = 0.74
+CONFIDENCE_ABSTAIN_THRESHOLD = 0.74  # below this cosine similarity → abstain
 
 # ── Medical disclaimer ─────────────────────────────────────────────────
 DISCLAIMER_TEXT = "Information from FDA labels, not medical advice."

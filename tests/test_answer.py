@@ -35,6 +35,7 @@ def _make_dummy_chunk(
     text: str = "The starting dose of metformin hydrochloride tablets is 500 mg orally once daily.",
     source_url: str = "https://dailymed.nlm.nih.gov/dailymed/lookup.cfm?setid=test-metformin",
     score: float = 0.032,  # high RRF score
+    similarity: float = 0.85,
 ) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=chunk_id,
@@ -44,6 +45,8 @@ def _make_dummy_chunk(
         source_url=source_url,
         chunk_index=0,
         score=score,
+        similarity=similarity,
+        vector_similarity=similarity,
     )
 
 
@@ -142,20 +145,21 @@ class TestAbstainBehavior:
     def test_abstain_when_retrieval_below_threshold(self, tmp_path: Path):
         queue_file = tmp_path / "review_queue.jsonl"
         retriever = MagicMock()
-        # raw score 0.005 -> normalized score 0.005 / (2/61) = 0.1525 < 0.25 threshold
-        retriever.retrieve.return_value = [_make_dummy_chunk(score=0.005)]
+        # similarity 0.60 < 0.74 threshold
+        retriever.retrieve.return_value = [_make_dummy_chunk(similarity=0.60)]
 
         llm = FakeLLMClient(default_response="Should never be called")
         engine = AnswerEngine(
             retriever=retriever,
             llm_client=llm,
-            abstain_threshold=0.25,
+            abstain_threshold=0.74,
             review_queue_file=queue_file,
         )
 
         res = engine.answer_question("What is the dose of a random unknown compound?")
         assert res.abstained is True
         assert res.confidence == "low"
+        assert res.confidence_score == 0.60
         assert "Insufficient evidence" in res.answer
         assert DISCLAIMER_TEXT in res.answer
         assert res.review_queued is True
@@ -168,6 +172,50 @@ class TestAbstainBehavior:
         assert entry["question"] == "What is the dose of a random unknown compound?"
         assert entry["confidence"] == "low"
         assert entry["reason"] == "retrieval_confidence_below_threshold"
+
+    def test_abstain_when_query_drug_mismatches_top_chunk(self, tmp_path: Path):
+        queue_file = tmp_path / "review_queue.jsonl"
+        retriever = MagicMock()
+        # High similarity, but drug mismatch: query names metformin, top chunk is acetaminophen
+        retriever.retrieve.return_value = [
+            _make_dummy_chunk(drug_name="acetaminophen", similarity=0.88)
+        ]
+
+        llm = FakeLLMClient(default_response="Should not be called")
+        engine = AnswerEngine(
+            retriever=retriever,
+            llm_client=llm,
+            abstain_threshold=0.74,
+            review_queue_file=queue_file,
+        )
+
+        res = engine.answer_question("What is the dose of metformin?")
+        assert res.abstained is True
+        assert res.confidence == "low"
+        assert res.review_queued is True
+
+        entry = json.loads(queue_file.read_text(encoding="utf-8").strip().splitlines()[0])
+        assert entry["reason"] == "drug_detection_mismatch"
+
+    def test_confidence_levels_high_and_medium(self, tmp_path: Path):
+        retriever = MagicMock()
+        llm = FakeLLMClient(default_response="Metformin is 500 mg [metformin | dosage].")
+
+        # Test High confidence (sim >= 0.80)
+        retriever.retrieve.return_value = [_make_dummy_chunk(drug_name="metformin", similarity=0.85)]
+        engine = AnswerEngine(retriever=retriever, llm_client=llm, review_queue_file=tmp_path / "q1.jsonl")
+        res_high = engine.answer_question("What is the dose of metformin?")
+        assert res_high.abstained is False
+        assert res_high.confidence == "high"
+        assert res_high.confidence_score == 0.85
+
+        # Test Medium confidence (0.74 <= sim < 0.80)
+        retriever.retrieve.return_value = [_make_dummy_chunk(drug_name="metformin", similarity=0.76)]
+        engine_med = AnswerEngine(retriever=retriever, llm_client=llm, review_queue_file=tmp_path / "q2.jsonl")
+        res_med = engine_med.answer_question("What is the dose of metformin?")
+        assert res_med.abstained is False
+        assert res_med.confidence == "medium"
+        assert res_med.confidence_score == 0.76
 
     def test_abstain_when_no_chunks_retrieved(self, tmp_path: Path):
         queue_file = tmp_path / "review_queue.jsonl"
@@ -191,7 +239,7 @@ class TestAbstainBehavior:
     def test_abstain_when_model_responds_insufficient_evidence(self, tmp_path: Path):
         queue_file = tmp_path / "review_queue.jsonl"
         retriever = MagicMock()
-        retriever.retrieve.return_value = [_make_dummy_chunk(score=0.032)]
+        retriever.retrieve.return_value = [_make_dummy_chunk(similarity=0.85)]
 
         llm = FakeLLMClient(
             default_response="Insufficient evidence to answer this question from the provided label."
