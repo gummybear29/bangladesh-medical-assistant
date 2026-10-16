@@ -49,14 +49,18 @@ st.set_page_config(
 
 
 @st.cache_resource
-def get_cached_answer_engine():
+def get_cached_answer_engine(api_key: str = ""):
     from src.answer.engine import AnswerEngine
+    from src.llm.client import GeminiClient
+    if api_key:
+        return AnswerEngine(llm_client=GeminiClient(api_key=api_key))
     return AnswerEngine()
 
 
 @st.cache_resource
-def get_cached_multimodal_assistant():
-    return MultimodalMedicalAssistant()
+def get_cached_multimodal_assistant(api_key: str = ""):
+    effective_key = api_key or GEMINI_API_KEY
+    return MultimodalMedicalAssistant(api_key=effective_key)
 
 
 # ── Custom CSS ─────────────────────────────────────────────────────────
@@ -159,11 +163,25 @@ with st.sidebar:
         st.markdown(f"**{hl['title']}**: `📞 {num}`\n\n*{hl['description']}*")
 
     st.markdown("---")
+    st.markdown("---")
     st.markdown("### ⚙️ System Status")
-    if GEMINI_API_KEY:
-        st.success("🟢 Live Gemini 2.0 Flash Multimodal Active")
+    active_key = st.session_state.get("user_gemini_key", "").strip() or GEMINI_API_KEY
+    if active_key:
+        st.success("🟢 Live Gemini 2.0 Flash Active (Real LLM & Vision)")
     else:
-        st.info("ℹ️ Local Offline / Demo Engine Active (Sub-second inference)")
+        st.warning("🟡 Offline Mode (Mock Simulator & Heuristics)")
+        st.caption("Enter a free Gemini API key to activate the live conversational neural model:")
+
+    custom_key = st.text_input(
+        "🔑 Gemini API Key (Free tier):",
+        value=st.session_state.get("user_gemini_key", ""),
+        type="password",
+        placeholder="AIzaSy...",
+        help="Get a free key in 10 seconds from https://aistudio.google.com/app/apikey to turn on live conversational Gemini reasoning and vision.",
+    )
+    if custom_key != st.session_state.get("user_gemini_key", ""):
+        st.session_state["user_gemini_key"] = custom_key
+        st.rerun()
 
 
 # ── Top Emergency Banner ───────────────────────────────────────────────
@@ -275,7 +293,8 @@ with tab1:
             st.warning("Please enter a question or upload an image." if not is_bengali else "দয়া করে একটি প্রশ্ন লিখুন অথবা ছবি আপলোড করুন।")
         else:
             with st.spinner("Analyzing clinical data & first-aid guidelines..." if not is_bengali else "চিকিৎসা ও প্রাথমিক সহায়তার তথ্য বিশ্লেষণ করা হচ্ছে..."):
-                multimodal_assistant = get_cached_multimodal_assistant()
+                active_key = st.session_state.get("user_gemini_key", "").strip() or GEMINI_API_KEY
+                multimodal_assistant = get_cached_multimodal_assistant(active_key)
                 has_image = pil_image is not None
                 bd_match = lookup_bangladesh_brand(active_text)
                 firstaid_match = find_first_aid_protocol(active_text)
@@ -298,7 +317,7 @@ with tab1:
                         "query": active_text,
                     }
                 else:
-                    engine = get_cached_answer_engine()
+                    engine = get_cached_answer_engine(active_key)
                     res = engine.answer_question(active_text)
                     st.session_state["latest_result"] = {
                         "type": "rag",
@@ -336,6 +355,11 @@ with tab1:
 
             st.markdown(analysis.text)
 
+            if getattr(analysis, "is_live_gemini", False):
+                st.caption("🤖 *Generated live by Google Gemini 2.0 Flash Multimodal Vision*")
+            else:
+                st.caption("ℹ️ *Running in Offline Demo Mode. Paste a Gemini API key in the sidebar to activate live conversational neural reasoning.*")
+
         elif res_info["type"] == "rag":
             res = res_info["data"]
             st.markdown("### 📋 Clinical Drug Information" if not is_bengali else "### 📋 ওষুধের অফিসিয়াল তথ্য")
@@ -350,6 +374,14 @@ with tab1:
 
             st.markdown(badge_html, unsafe_allow_html=True)
             st.markdown(f"> {res.answer}")
+
+            # RAG Inspection View
+            if hasattr(res, "retrieved_chunks") and res.retrieved_chunks:
+                with st.expander(f"🔬 Inspect RAG Pipeline: Retrieved Context Chunks ({len(res.retrieved_chunks)}) & Similarity Scores"):
+                    st.caption("The RAG engine retrieved these context passages from ChromaDB + BM25 and fed them into the LLM:")
+                    for i, ch in enumerate(res.retrieved_chunks, 1):
+                        st.markdown(f"**Chunk #{i}** — `{ch['drug'].title()}` | Section: `{ch['section']}` | **Cosine Similarity:** `{ch.get('similarity', 0.0)}`")
+                        st.text(ch['text'])
 
             if res.sources:
                 with st.expander(f"📚 Verified Sources & Package Inserts ({len(res.sources)})"):

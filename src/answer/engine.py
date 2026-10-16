@@ -93,6 +93,7 @@ class AnswerResult:
     confidence_score: float = 0.0
     review_queued: bool = False
     retrieved_chunk_ids: list[str] = field(default_factory=list)
+    retrieved_chunks: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +104,7 @@ class AnswerResult:
             "confidence_score": self.confidence_score,
             "review_queued": self.review_queued,
             "retrieved_chunk_ids": self.retrieved_chunk_ids,
+            "retrieved_chunks": self.retrieved_chunks,
         }
 
 
@@ -295,6 +297,16 @@ class AnswerEngine:
                 reason=reason,
                 chunks=chunks,
             )
+            serialized_chunks = [
+                {
+                    "id": c.chunk_id,
+                    "drug": c.drug_name,
+                    "section": c.section,
+                    "text": c.text,
+                    "similarity": round(c.similarity, 4),
+                }
+                for c in chunks
+            ]
             return AnswerResult(
                 answer=self._format_with_disclaimer("Insufficient evidence to answer this question."),
                 sources=[
@@ -306,6 +318,7 @@ class AnswerEngine:
                 confidence_score=confidence_score,
                 review_queued=True,
                 retrieved_chunk_ids=[c.chunk_id for c in chunks],
+                retrieved_chunks=serialized_chunks,
             )
 
         # 4. Format prompt
@@ -323,6 +336,16 @@ class AnswerEngine:
 
         # 6. Check if model self-abstained
         is_insufficient = "insufficient evidence" in answer_text.lower()
+        serialized_chunks = [
+            {
+                "id": c.chunk_id,
+                "drug": c.drug_name,
+                "section": c.section,
+                "text": c.text,
+                "similarity": round(c.similarity, 4),
+            }
+            for c in chunks
+        ]
         if is_insufficient:
             confidence = "low"
             append_review_queue(
@@ -345,6 +368,7 @@ class AnswerEngine:
                 confidence_score=confidence_score,
                 review_queued=True,
                 retrieved_chunk_ids=[c.chunk_id for c in chunks],
+                retrieved_chunks=serialized_chunks,
             )
 
         # 7. Parse citations and append disclaimer
@@ -359,5 +383,6 @@ class AnswerEngine:
             confidence_score=confidence_score,
             review_queued=False,
             retrieved_chunk_ids=[c.chunk_id for c in chunks],
+            retrieved_chunks=serialized_chunks,
         )
 
