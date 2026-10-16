@@ -25,6 +25,7 @@ from src.config import (
     CONFIDENCE_HIGH,
     CONFIDENCE_MEDIUM,
     DISCLAIMER_TEXT,
+    GEMINI_API_KEY,
     RETRIEVAL_TOP_K,
     REVIEW_QUEUE_FILE,
     RRF_K,

@@ -307,10 +307,13 @@ class LocalTransformersClient(LLMClient):
     def generate(
         self,
         prompt: str,
+        system: str | None = None,
         system_prompt: str | None = None,
     ) -> LLMResponse:
+        eff_system = system or system_prompt
+
         # 1. Check local disk cache
-        cache_file = self._get_cache_path(prompt, system_prompt)
+        cache_file = self._get_cache_path(prompt, eff_system)
         if cache_file.exists():
             try:
                 data = json.loads(cache_file.read_text(encoding="utf-8"))
@@ -328,8 +331,8 @@ class LocalTransformersClient(LLMClient):
             self._init_model()
 
             messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+            if eff_system:
+                messages.append({"role": "system", "content": eff_system})
             messages.append({"role": "user", "content": prompt})
 
             text = self._tokenizer.apply_chat_template(
