@@ -91,9 +91,26 @@ class FakeLLMClient(LLMClient):
     ) -> LLMResponse:
         self.call_count += 1
         prompt_lower = prompt.lower()
+        # If this is a RAG prompt with "Question: ...", prioritize matching on the question text
+        # so keywords don't accidentally match background chunks in context
+        q_text = prompt_lower
+        if "question:" in prompt_lower:
 
+            parts = prompt_lower.split("question:", 1)
+            if len(parts) > 1:
+                q_text = parts[1].split("answer:", 1)[0].strip()
 
-        # Check keyword mappings
+        # Check keyword mappings against question text first
+        for key, ans in self.responses.items():
+            if key.lower() in q_text:
+                return LLMResponse(
+                    text=ans,
+                    success=True,
+                    from_cache=False,
+                    model="fake-llm",
+                )
+
+        # Fall back to full prompt matching if not matched in question
         for key, ans in self.responses.items():
             if key.lower() in prompt_lower:
                 return LLMResponse(
@@ -102,6 +119,7 @@ class FakeLLMClient(LLMClient):
                     from_cache=False,
                     model="fake-llm",
                 )
+
 
         return LLMResponse(
             text=self.default_response,
