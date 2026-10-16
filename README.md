@@ -1,6 +1,6 @@
 ---
 title: Bangladesh Medical & First Aid Assistant
-emoji: 🇧🇩
+emoji: 💊
 colorFrom: red
 colorTo: green
 sdk: gradio
