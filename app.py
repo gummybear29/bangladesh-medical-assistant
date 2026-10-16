@@ -37,6 +37,29 @@ if str(PROJECT_ROOT) not in sys.path:
 from PIL import Image
 import gradio as gr
 
+# Hotfix for gradio_client schema bug where boolean additionalProperties triggers TypeError
+try:
+    import gradio_client.utils as gc_utils
+    orig_json_schema = getattr(gc_utils, "_json_schema_to_python_type", None)
+    if orig_json_schema:
+        def patched_json_schema_to_python_type(schema, defs=None):
+            if isinstance(schema, bool):
+                return "bool" if schema else "None"
+            if not isinstance(schema, dict):
+                return "Any"
+            return orig_json_schema(schema, defs)
+        gc_utils._json_schema_to_python_type = patched_json_schema_to_python_type
+
+    orig_get_type = getattr(gc_utils, "get_type", None)
+    if orig_get_type:
+        def patched_get_type(schema):
+            if not isinstance(schema, dict):
+                return "Any"
+            return orig_get_type(schema)
+        gc_utils.get_type = patched_get_type
+except Exception:
+    pass
+
 from src.answer.engine import AnswerEngine
 from src.firstaid.triage import FIRST_AID_PROTOCOLS, find_first_aid_protocol
 from src.knowledge.bangladesh_pharma import (
