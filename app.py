@@ -9,6 +9,11 @@ Features:
 
 from __future__ import annotations
 
+import os
+
+# Disable Gradio SSR mode to avoid Node proxy collision with ZeroGPU CUDA contexts
+os.environ["GRADIO_SSR_MODE"] = "False"
+
 # Hugging Face ZeroGPU compatibility: spaces MUST be imported first before torch/transformers
 try:
     import spaces
@@ -22,7 +27,6 @@ except Exception:
                 return fn
             return lambda f: f
 
-import os
 import sys
 from pathlib import Path
 
@@ -154,7 +158,7 @@ custom_css = """
 }
 """
 
-with gr.Blocks(title="Bangladesh Medical & First-Aid Assistant") as demo:
+with gr.Blocks(title="Bangladesh Medical & First-Aid Assistant", css=custom_css) as demo:
     gr.HTML(
         """
         <div class="emergency-strip">
@@ -255,4 +259,4 @@ with gr.Blocks(title="Bangladesh Medical & First-Aid Assistant") as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, ssr_mode=False)
