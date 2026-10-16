@@ -38,8 +38,13 @@ RRF_K = 60  # Reciprocal Rank Fusion constant
 
 # ── Confidence thresholds ──────────────────────────────────────────────
 CONFIDENCE_HIGH = 0.45
-CONFIDENCE_MEDIUM = 0.25  # below this → abstain
+CONFIDENCE_MEDIUM = 0.25
+CONFIDENCE_ABSTAIN_THRESHOLD = 0.25  # below this normalized score → abstain
+
+# ── Medical disclaimer ─────────────────────────────────────────────────
+DISCLAIMER_TEXT = "Information from FDA labels, not medical advice."
 
 # ── Logging ────────────────────────────────────────────────────────────
 APP_LOG_FILE = LOGS_DIR / "app.jsonl"
-REVIEW_QUEUE_FILE = LOGS_DIR / "human_review_queue.jsonl"
+REVIEW_QUEUE_FILE = DATA_DIR / "review_queue.jsonl"
+

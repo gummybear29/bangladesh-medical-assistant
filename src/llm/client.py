@@ -26,7 +26,15 @@ from src.config import (
 logger = logging.getLogger(__name__)
 
 
+# ── Exceptions ─────────────────────────────────────────────────────────
+
+
+class LLMServiceError(Exception):
+    """Raised when the LLM service is unavailable or rate-limited."""
+
+
 # ── Response Data Model ────────────────────────────────────────────────
+
 
 
 @dataclass
@@ -34,7 +42,7 @@ class LLMResponse:
     """Unified response object returned by all LLM clients."""
 
     text: str
-    success: bool
+    success: bool = True
     error: str | None = None
     from_cache: bool = False
     model: str = ""
@@ -53,6 +61,7 @@ class LLMClient(ABC):
     def generate(
         self,
         prompt: str,
+        system: str | None = None,
         system_prompt: str | None = None,
     ) -> LLMResponse:
         """Generate a response given a prompt and optional system prompt."""
@@ -77,10 +86,12 @@ class FakeLLMClient(LLMClient):
     def generate(
         self,
         prompt: str,
+        system: str | None = None,
         system_prompt: str | None = None,
     ) -> LLMResponse:
         self.call_count += 1
         prompt_lower = prompt.lower()
+
 
         # Check keyword mappings
         for key, ans in self.responses.items():
@@ -140,15 +151,19 @@ class GeminiClient(LLMClient):
     def generate(
         self,
         prompt: str,
+        system: str | None = None,
         system_prompt: str | None = None,
     ) -> LLMResponse:
         """Generate response with SHA-256 disk caching and exponential backoff retry.
 
         Never crashes: returns an LLMResponse with success=False if all retries fail.
         """
+        eff_system = system if system is not None else system_prompt
+
         # 1. Check Disk Cache
-        cache_file = self._get_cache_path(prompt, system_prompt)
+        cache_file = self._get_cache_path(prompt, eff_system)
         if cache_file.exists():
+
             try:
                 data = json.loads(cache_file.read_text(encoding="utf-8"))
                 logger.debug("LLM cache hit: %s", cache_file.name)
@@ -175,8 +190,9 @@ class GeminiClient(LLMClient):
 
         # 3. Assemble prompt payload
         full_content = prompt
-        if system_prompt:
-            full_content = f"{system_prompt}\n\n---\n\n{prompt}"
+        if eff_system:
+            full_content = f"{eff_system}\n\n---\n\n{prompt}"
+
 
         # 4. Execute with retries & exponential backoff
         last_error = ""
