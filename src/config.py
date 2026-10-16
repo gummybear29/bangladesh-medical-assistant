@@ -22,9 +22,10 @@ EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 CHUNK_SIZE_TOKENS = 400
 CHUNK_OVERLAP_TOKENS = 50
 
-# ── ChromaDB ───────────────────────────────────────────────────────────
+# ── ChromaDB & BM25 ────────────────────────────────────────────────────
 CHROMA_DIR = DATA_DIR / "chroma"
 CHROMA_COLLECTION = "drug_labels"
+BM25_INDEX_FILE = DATA_DIR / "bm25_index.pkl"
 
 # ── LLM ────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
