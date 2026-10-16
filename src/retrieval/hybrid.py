@@ -151,6 +151,13 @@ DRUG_ALIASES: dict[str, str] = {
     "ambien": "zolpidem",
 }
 
+# Merge Bangladesh popular brands and common typos
+try:
+    from src.knowledge.bangladesh_pharma import BANGLADESH_BRAND_TO_GENERIC
+    DRUG_ALIASES.update(BANGLADESH_BRAND_TO_GENERIC)
+except ImportError:
+    pass
+
 
 def detect_drugs_in_query(
     query: str, known_drugs: list[str] | None = None
@@ -158,7 +165,7 @@ def detect_drugs_in_query(
     """Extract canonical drug names mentioned in a query.
 
     Checks generic names first (handling multi-word generics like
-    'insulin glargine'), then known brand/common aliases.
+    'insulin glargine'), then known brand/common aliases including Bangladesh brands.
     """
     if not query:
         return []
@@ -173,9 +180,17 @@ def detect_drugs_in_query(
             if drug not in detected:
                 detected.append(drug)
 
-    # Check brand aliases
-    for alias, canonical in DRUG_ALIASES.items():
-        if re.search(rf"\b{re.escape(alias)}\b", clean_q):
+    # Check brand aliases (sorted longest first to match 'napa extra' before 'napa')
+    sorted_aliases = sorted(DRUG_ALIASES.items(), key=lambda x: len(x[0]), reverse=True)
+    for alias, canonical in sorted_aliases:
+        # Check ASCII word boundary or substring match for non-ASCII (Bangla)
+        is_ascii = all(ord(c) < 128 for c in alias)
+        if is_ascii:
+            matched = bool(re.search(rf"\b{re.escape(alias)}\b", clean_q))
+        else:
+            matched = alias in clean_q
+
+        if matched:
             if canonical not in detected:
                 detected.append(canonical)
 
