@@ -306,6 +306,57 @@ FIRST_AID_PROTOCOLS: dict[str, FirstAidProtocol] = {
         ],
         emergency_contacts=["999", "16263"],
     ),
+    "fracture": FirstAidProtocol(
+        id="fracture",
+        title_en="Broken Bone, Fracture & Sprain First Aid",
+        title_bn="হাড় ভাঙা, ফ্র্যাকচার ও মচকে যাওয়ার জরুরি প্রাথমিক চিকিৎসা",
+        category="Trauma / Orthopedics",
+        urgency_level="EMERGENCY_CRITICAL",
+        quick_summary_en="DO NOT attempt to push, realign, or 'fix' a broken bone yourself! Keep the limb completely STILL, immobilize with a splint/padding, apply ice wrapped in cloth, and transport immediately to NITOR (পঙ্গু হাসপাতাল) or nearest hospital.",
+        quick_summary_bn="কখনোই নিজে নিজে ভাঙা হাড় সোজা করার বা 'জোড়া লাগানোর' চেষ্টা করবেন না! আক্রান্ত অঙ্গটি যেভাবে আছে সেভাবেই কাঠি বা কাপড় দিয়ে বেঁধে স্থির রাখুন (Immobilize)। বরফের সেঁক দিন এবং অবিলম্বে পঙ্গু হাসপাতাল (NITOR) বা হাসপাতালে নিন।",
+        dos_en=[
+            "CRITICAL: Keep the injured limb completely STILL in the exact position it was found.",
+            "Immobilize the fracture site using a rigid splint (cardboard, wood, folded newspaper) extending beyond the joints above and below the break.",
+            "Apply an ice pack or cold compress wrapped in a towel for 15-20 minutes to reduce acute swelling and pain.",
+            "If an open fracture (bone pierced through skin): Cover the wound with a clean sterile cloth. Do NOT push the bone back in!",
+            "Call 999 or transport carefully to the National Institute of Traumatology & Orthopaedics (NITOR / পঙ্গু হাসপাতাল) or nearest hospital.",
+        ],
+        dos_bn=[
+            "ভাঙা হাত বা পা যেভাবে আছে সেভাবেই স্থির রাখুন, কোনো অবস্থাতেই জোরাজুরি করবেন না।",
+            "ভাঙা অংশের ওপরে ও নিচে শক্ত কাঠি, স্কেল বা পিচবোর্ড দিয়ে আলতো করে বেঁধে দিন (Splinting)।",
+            "তোয়ালেতে বরফ পেঁচিয়ে আলতো করে সেঁক দিন যাতে ফোলা ও ব্যথা কমে।",
+            "হাড় চামড়া ভেদ করে বাইরে বের হয়ে থাকলে পরিষ্কার কাপড় দিয়ে ঢেকে রাখুন, কখনোই হাড় ভেতরে ঢোকানোর চেষ্টা করবেন না!",
+            "দ্রুত জাতীয় অর্থোপেডিক হাসপাতাল (পঙ্গু হাসপাতাল - NITOR) বা নিকটস্থ হাসপাতালে নিন।",
+        ],
+        donts_en=[
+            "DO NOT attempt to push, force, massage, or straighten a broken or dislocated bone!",
+            "DO NOT visit untrained bone-setters (হাড্ডি কবিরাজ/হাতুড়ে) who forcefully twist or massage fractured limbs — causes permanent disability and nerve damage!",
+            "DO NOT allow the patient to walk or bear weight on a suspected leg/ankle/hip fracture.",
+            "DO NOT apply hot packs or massage immediately after injury.",
+        ],
+        donts_bn=[
+            "ভুল করেও ভাঙা হাড় টেনে সোজা করার বা মালিশ করার চেষ্টা করবেন না!",
+            "হাতুড়ে কবিরাজ বা তথাকথিত 'হাড় জোড়া দেওয়া কবিরাজ'-এর কাছে যাবেন না—এতে পঙ্গু হওয়ার মারাত্মক ঝুঁকি থাকে!",
+            "পায়ে আঘাত থাকলে রোগীকে হাঁটানোর চেষ্টা করবেন না।",
+            "আঘাতের পরপরই গরম সেঁক বা তেল মালিশ করবেন না।",
+        ],
+        red_flags_en=[
+            "Bone piercing through the skin or visible deformity/unnatural angle",
+            "Numbness, tingling, pale/blue skin, or coldness in fingers or toes below the break",
+            "Suspected neck, spine, pelvis, or skull injury (DO NOT move patient, call 999 immediately)",
+            "Intolerable, excruciating pain or rapid severe swelling",
+        ],
+        red_flags_bn=[
+            "হাড় চামড়া ভেদ করে বাইরে বের হওয়া বা অঙ্গ অস্বাভাবিকভাবে বেঁকে থাকা",
+            "আক্রান্ত অংশের নিচের আঙুল নীল বা ফ্যাকাশে হয়ে যাওয়া ও অবশ লাগা (রক্ত চলাচল বন্ধের লক্ষণ)",
+            "ঘাড়, মেরুদণ্ড বা কোমরে আঘাত (রোগীকে নড়াচড়া করাবেন না, অবিলম্বে ৯৯৯-এ কল দিন)",
+        ],
+        emergency_contacts=[
+            "National Institute of Traumatology & Orthopaedic Rehabilitation (NITOR / পঙ্গু হাসপাতাল): 02-9144190",
+            "999 (National Ambulance)",
+            "16263 (Shastho Batayan)",
+        ],
+    ),
 }
 
 
@@ -319,6 +370,7 @@ def find_first_aid_protocol(query: str) -> FirstAidProtocol | None:
         (r"\b(diarrhea|cholera|ডায়রিয়া|পাতলা\s*পায়খানা|ওরস্যালাইন|orsaline|dehydration|কলেরা)\b", "diarrhea"),
         (r"\b(bleed|bleeding|cut|রক্তপাত|কেটে\s*গেছে|কাটা|জখম|ক্ষত|wound|bandage)\b", "bleeding"),
         (r"\b(chok|choking|দম\s*বন্ধ|গলায়\s*আটকে|heimlich|শ্বাস\s*আটকে)\b", "choking"),
+        (r"\b(bone|bones|fracture|fractures|fractured|broken\s*bone|broken\s*arm|broken\s*leg|broken\s*hand|broken\s*wrist|broken\s*ankle|haddi|হাড়|হাড়\s*ভাঙা|হাড়\s*ভেঙে|মচকে|dislocation|dislocated|sprain|sprained|twisted\s*ankle|পঙ্গু|orthopedic)\b", "fracture"),
     ]
     for pattern, protocol_key in mapping:
         if re.search(pattern, q_lower):

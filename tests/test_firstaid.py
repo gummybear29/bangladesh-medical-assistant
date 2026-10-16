@@ -8,7 +8,7 @@ from src.firstaid.triage import FIRST_AID_PROTOCOLS, find_first_aid_protocol
 
 
 def test_core_protocols_present():
-    expected = ["dengue", "burns", "snakebite", "diarrhea", "bleeding", "choking"]
+    expected = ["dengue", "burns", "snakebite", "diarrhea", "bleeding", "choking", "fracture"]
     for p in expected:
         assert p in FIRST_AID_PROTOCOLS
 
@@ -47,3 +47,10 @@ def test_find_first_aid_protocol():
     res_snake = find_first_aid_protocol("সাপের কামড় দিলে কী করব?")
     assert res_snake is not None
     assert res_snake.id == "snakebite"
+
+    res_bone = find_first_aid_protocol("how to fix bone")
+    assert res_bone is not None
+    assert res_bone.id == "fracture"
+    assert any("still" in do.lower() for do in res_bone.dos_en)
+    assert any("straighten" in dont.lower() or "push" in dont.lower() for dont in res_bone.donts_en)
+    assert any("NITOR" in c for c in res_bone.emergency_contacts)

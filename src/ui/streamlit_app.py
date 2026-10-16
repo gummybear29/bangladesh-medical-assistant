@@ -33,6 +33,7 @@ from src.knowledge.bangladesh_pharma import (
     lookup_bangladesh_brand,
 )
 from src.llm.multimodal import MultimodalMedicalAssistant
+from src.retrieval.hybrid import detect_drugs_in_query
 
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/ask")
 
@@ -200,113 +201,160 @@ tab1, tab2, tab3 = st.tabs([
 # ═══════════════════════════════════════════════════════════════════════
 
 with tab1:
-    # Quick Chips
+    # Initialize query in session state
+    if "user_medical_query" not in st.session_state:
+        st.session_state["user_medical_query"] = ""
+
+    def set_active_query(q_text: str) -> None:
+        st.session_state["user_medical_query"] = q_text
+
+    # Quick Topics Chips
     st.markdown("**Quick Topics / দ্রুত বিষয় নির্বাচন করুন:**")
-    q_cols = st.columns(6)
+    q_cols = st.columns(7)
     quick_queries = [
         ("Dengue Care", "What is the first aid and medicine for Dengue fever?", "ডেঙ্গু জ্বর ও নাপা"),
         ("Burns First Aid", "What should I immediately do for hot water burn?", "আগুনে পোড়ার প্রাথমিক চিকিৎসা"),
         ("Snakebite Protocol", "First aid steps for snakebite in Bangladesh", "সাপের কামড় দিলে কী করবেন?"),
+        ("Broken Bone", "How to fix a broken bone or fracture? Immediate first aid", "হাড় ভেঙে গেলে বা মচকে গেলে প্রাথমিক চিকিৎসা"),
         ("ORS / Diarrhea", "How to prepare Orsaline-N properly for diarrhea?", "খাবার স্যালাইন বানানোর সঠিক নিয়ম"),
         ("Napa Dosage", "What is the maximum daily dose of Napa (paracetamol)?", "নাপা ৫০০ খাওয়ার সঠিক ডোজ কত?"),
         ("Cut & Bleeding", "How to stop heavy bleeding from a cut wound?", "রক্তপাত বন্ধ করার প্রাথমিক চিকিৎসা"),
     ]
 
-    selected_query = ""
     for idx, (label, en_q, bn_q) in enumerate(quick_queries):
         btn_text = bn_q if is_bengali else label
-        if q_cols[idx].button(btn_text, use_container_width=True, key=f"quick_btn_{idx}"):
-            selected_query = bn_q if is_bengali else en_q
-
-    # Input Fields
-    col_input, col_media = st.columns([1.6, 1.0])
-
-    with col_input:
-        default_val = selected_query or st.session_state.get("active_query", "")
-        user_query = st.text_area(
-            "Enter your medical or first-aid question:" if not is_bengali else "আপনার প্রশ্ন বা ওষুধের নাম লিখুন:",
-            value=default_val,
-            placeholder="e.g. Can I take Napa Extra for dengue? Or: How to treat a burn wound?",
-            height=120,
+        target_q = bn_q if is_bengali else en_q
+        q_cols[idx].button(
+            btn_text,
+            use_container_width=True,
+            key=f"quick_btn_{idx}",
+            on_click=set_active_query,
+            args=(target_q,),
         )
 
-    with col_media:
-        st.markdown("**📷 Upload Image (Optional / ঐচ্ছিক):**")
-        uploaded_file = st.file_uploader(
-            "Medicine strip, prescription, or injury image:",
-            type=["png", "jpg", "jpeg", "webp"],
-            help="Upload a photo of a medicine strip, doctor prescription, burn, or wound.",
+    # Form to guarantee input submission without race conditions
+    with st.form("medical_consult_form", clear_on_submit=False):
+        col_input, col_media = st.columns([1.6, 1.0])
+
+        with col_input:
+            user_query = st.text_area(
+                "Enter your medical or first-aid question:" if not is_bengali else "আপনার প্রশ্ন বা ওষুধের নাম লিখুন:",
+                key="user_medical_query",
+                placeholder="e.g. How to fix a broken bone? Can I take Napa for dengue? How to treat hot water burn?",
+                height=130,
+            )
+
+        with col_media:
+            st.markdown("**📷 Upload Image (Optional / ঐচ্ছিক):**")
+            uploaded_file = st.file_uploader(
+                "Medicine strip, prescription, or injury image:",
+                type=["png", "jpg", "jpeg", "webp"],
+                key="uploaded_medical_img",
+                help="Upload a photo of a medicine strip, doctor prescription, burn, or wound.",
+            )
+
+        submit_button = st.form_submit_button(
+            "🚀 Get Instant Guidance" if not is_bengali else "🚀 তাৎক্ষণিক পরামর্শ নিন",
+            type="primary",
+            use_container_width=True,
         )
-        pil_image = None
-        if uploaded_file is not None:
-            try:
-                pil_image = Image.open(uploaded_file)
-                st.image(pil_image, caption="Uploaded Medical Image", use_container_width=True)
-            except Exception as e:
-                st.error(f"Error loading image: {e}")
 
-    submit_button = st.button(
-        "🚀 Get Instant Guidance" if not is_bengali else "🚀 তাৎক্ষণিক পরামর্শ নিন",
-        type="primary",
-        use_container_width=True,
-    )
+    # Optional image display
+    pil_image = None
+    if uploaded_file is not None:
+        try:
+            pil_image = Image.open(uploaded_file)
+            st.image(pil_image, caption="Uploaded Medical Image", use_container_width=True)
+        except Exception as e:
+            st.error(f"Error loading image: {e}")
 
+    # Process Query on Submit
     if submit_button:
         active_text = user_query.strip()
         if not active_text and pil_image is None:
-            st.warning("Please enter a question or upload an image.")
+            st.warning("Please enter a question or upload an image." if not is_bengali else "দয়া করে একটি প্রশ্ন লিখুন অথবা ছবি আপলোড করুন।")
         else:
-            with st.spinner("Analyzing clinical data & first-aid guidelines..."):
-                # If an image is uploaded or the query is First-Aid/Bangladesh specific:
+            with st.spinner("Analyzing clinical data & first-aid guidelines..." if not is_bengali else "চিকিৎসা ও প্রাথমিক সহায়তার তথ্য বিশ্লেষণ করা হচ্ছে..."):
                 multimodal_assistant = get_cached_multimodal_assistant()
                 has_image = pil_image is not None
                 bd_match = lookup_bangladesh_brand(active_text)
                 firstaid_match = find_first_aid_protocol(active_text)
+                fda_drugs = detect_drugs_in_query(active_text)
 
-                # Route 1: Multimodal or First Aid or BD Brand Query
-                if has_image or bd_match or firstaid_match or is_bengali:
+                # Routing:
+                # 1. If image uploaded OR Bangladesh brand matched OR first-aid protocol matched OR query is Bengali OR no FDA drug is named:
+                #    Route to Multimodal Assistant for safe clinical triage & Bangladesh guidance.
+                # 2. If specific FDA drug mentioned with no image or first aid protocol:
+                #    Route to FDA Label RAG engine.
+                if has_image or bd_match or firstaid_match or is_bengali or not fda_drugs:
                     analysis = multimodal_assistant.analyze(
                         prompt=active_text,
                         image=pil_image,
                         language=lang_code,
                     )
-
-                    st.markdown("### 📋 Analysis & Guidance")
-                    if analysis.emergency_level == "EMERGENCY":
-                        st.markdown(
-                            """
-                            <div class="review-notice" style="background-color: #FEE2E2; border-color: #DC2626; color: #991B1B;">
-                                🚨 <strong>CRITICAL EMERGENCY ALERT</strong>: This condition requires immediate professional emergency care. Call <strong>999</strong> for an ambulance or rush to the nearest hospital.
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-                    st.markdown(analysis.text)
-
-                # Route 2: Standard Drug Label RAG Query
+                    st.session_state["latest_result"] = {
+                        "type": "multimodal",
+                        "data": analysis,
+                        "query": active_text,
+                    }
                 else:
-                    # Query cached in-process AnswerEngine
                     engine = get_cached_answer_engine()
                     res = engine.answer_question(active_text)
+                    st.session_state["latest_result"] = {
+                        "type": "rag",
+                        "data": res,
+                        "query": active_text,
+                    }
 
-                    st.markdown("### 📋 Clinical Answer")
+    # Render persisted result so it stays on screen
+    if "latest_result" in st.session_state:
+        res_info = st.session_state["latest_result"]
+        st.markdown("---")
+        st.markdown(f"**Question / জিজ্ঞাসা:** `{res_info['query']}`")
 
-                    # Confidence Badge
-                    if res.confidence == "high":
-                        badge_html = '<span class="badge-high">🟢 High Confidence</span>'
-                    elif res.confidence == "medium":
-                        badge_html = '<span class="badge-medium">🟡 Medium Confidence</span>'
-                    else:
-                        badge_html = '<span class="badge-low">🔴 Low Confidence (Abstained)</span>'
+        if res_info["type"] == "multimodal":
+            analysis = res_info["data"]
+            st.markdown("### 📋 Analysis & Guidance" if not is_bengali else "### 📋 তাৎক্ষণিক চিকিৎসা ও প্রাথমিক পরামর্শ")
+            if analysis.emergency_level == "EMERGENCY":
+                st.markdown(
+                    """
+                    <div class="review-notice" style="background-color: #FEE2E2; border-color: #DC2626; color: #991B1B;">
+                        🚨 <strong>CRITICAL EMERGENCY ALERT (জরুরি সতর্কতা)</strong>: This condition requires immediate professional emergency care. Call <strong>999</strong> for an ambulance or rush to the nearest emergency hospital.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            elif analysis.emergency_level == "WARNING":
+                st.markdown(
+                    """
+                    <div class="review-notice" style="background-color: #FEF9C3; border-color: #CA8A04; color: #854D0E;">
+                        ⚠️ <strong>CLINICAL WARNING (চিকিৎসা সতর্কতা)</strong>: Follow first-aid steps carefully and seek clinical evaluation at a healthcare facility if symptoms persist or worsen.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-                    st.markdown(badge_html, unsafe_allow_html=True)
-                    st.markdown(f"> {res.answer}")
+            st.markdown(analysis.text)
 
-                    if res.sources:
-                        with st.expander(f"📚 Verified Sources & Package Inserts ({len(res.sources)})"):
-                            for s in res.sources:
-                                st.markdown(f"- **{s.drug.title()}** | Section: `{s.section}` — [View DailyMed Link]({s.url})")
+        elif res_info["type"] == "rag":
+            res = res_info["data"]
+            st.markdown("### 📋 Clinical Drug Information" if not is_bengali else "### 📋 ওষুধের অফিসিয়াল তথ্য")
+
+            # Confidence Badge
+            if res.confidence == "high":
+                badge_html = '<span class="badge-high">🟢 High Confidence</span>'
+            elif res.confidence == "medium":
+                badge_html = '<span class="badge-medium">🟡 Medium Confidence</span>'
+            else:
+                badge_html = '<span class="badge-low">🔴 Low Confidence (Abstained)</span>'
+
+            st.markdown(badge_html, unsafe_allow_html=True)
+            st.markdown(f"> {res.answer}")
+
+            if res.sources:
+                with st.expander(f"📚 Verified Sources & Package Inserts ({len(res.sources)})"):
+                    for s in res.sources:
+                        st.markdown(f"- **{s.drug.title()}** | Section: `{s.section}` — [View DailyMed Link]({s.url})")
 
 
 # ═══════════════════════════════════════════════════════════════════════
