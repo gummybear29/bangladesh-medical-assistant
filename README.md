@@ -1,4 +1,17 @@
-# 💊 FDA Drug-Label RAG Question-Answering System
+---
+title: Bangladesh Medical & First Aid Assistant
+emoji: 🇧🇩
+colorFrom: red
+colorTo: green
+sdk: gradio
+sdk_version: 6.30.0
+app_file: app.py
+pinned: false
+license: mit
+short_description: Multimodal First-Aid & Bangladesh Medicine Assistant
+---
+
+# 🇧🇩 Bangladesh Medical, First-Aid & Drug-Label RAG Assistant
 
 A production-grade, spec-driven Retrieval-Augmented Generation (RAG) system for querying FDA-approved drug labeling data. Built on a 100% free open-source stack with hybrid vector-lexical retrieval, automated multi-drug routing, strict citation formatting, prompt injection defense, and confidence-gated abstention.
 

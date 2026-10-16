@@ -1,7 +1,7 @@
 # Data
-data/*
-!data/sample/
-!data/sample/*.json
+data/llm_cache/
+data/labels/
+data/review_queue.jsonl
 
 
 # Logs
