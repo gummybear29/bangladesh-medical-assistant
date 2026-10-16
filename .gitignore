@@ -1,5 +1,8 @@
 # Data
-data/
+data/*
+!data/sample/
+!data/sample/*.json
+
 
 # Logs
 logs/
