@@ -159,7 +159,8 @@ def chunk_section(
             current_tokens += s_tokens
             end_idx += 1
 
-        chunk_text = " ".join(current_sentences)
+        body_text = " ".join(current_sentences)
+        chunk_text = f"Drug: {drug_name} | Section: {section}\n\n{body_text}"
         chunk_id = f"{drug_name}__{section}__{chunk_index}"
         chunks.append(
             Chunk(

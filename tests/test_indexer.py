@@ -119,7 +119,14 @@ class TestChunkSection:
         assert c.section == "dosage"
         assert c.chunk_index == 0
         assert c.source_url == "http://example.com/aspirin"
-        assert c.text == text
+        assert c.text == f"Drug: aspirin | Section: dosage\n\n{text}"
+
+    def test_chunk_prepends_drug_and_section_header(self):
+        text = "Take 1 tablet daily."
+        chunks = chunk_section("lisinopril", "dosage", text, "http://lisinopril")
+        assert len(chunks) == 1
+        assert chunks[0].text.startswith("Drug: lisinopril | Section: dosage\n\n")
+        assert chunks[0].text == f"Drug: lisinopril | Section: dosage\n\n{text}"
 
     def test_chunk_long_text_multiple_chunks_with_overlap(self):
         # Create text with many sentences (> 500 tokens)
