@@ -70,6 +70,115 @@ def compute_rrf_score(
     return score
 
 
+# ── Drug Aliases & Detection ───────────────────────────────────────────
+
+import re
+from src.ingest.download import DRUG_LIST
+
+DRUG_ALIASES: dict[str, str] = {
+    "tylenol": "acetaminophen",
+    "paracetamol": "acetaminophen",
+    "ventolin": "albuterol",
+    "proventil": "albuterol",
+    "fosamax": "alendronate",
+    "zyloprim": "allopurinol",
+    "xanax": "alprazolam",
+    "elavil": "amitriptyline",
+    "norvasc": "amlodipine",
+    "amoxil": "amoxicillin",
+    "augmentin": "amoxicillin",
+    "lipitor": "atorvastatin",
+    "zithromax": "azithromycin",
+    "z-pak": "azithromycin",
+    "coreg": "carvedilol",
+    "keflex": "cephalexin",
+    "cipro": "ciprofloxacin",
+    "celexa": "citalopram",
+    "klonopin": "clonazepam",
+    "plavix": "clopidogrel",
+    "flexeril": "cyclobenzaprine",
+    "valium": "diazepam",
+    "voltaren": "diclofenac",
+    "cardizem": "diltiazem",
+    "vibramycin": "doxycycline",
+    "cymbalta": "duloxetine",
+    "lexapro": "escitalopram",
+    "prozac": "fluoxetine",
+    "lasix": "furosemide",
+    "neurontin": "gabapentin",
+    "microzide": "hydrochlorothiazide",
+    "hctz": "hydrochlorothiazide",
+    "plaquenil": "hydroxychloroquine",
+    "advil": "ibuprofen",
+    "motrin": "ibuprofen",
+    "lantus": "insulin glargine",
+    "lamictal": "lamotrigine",
+    "synthroid": "levothyroxine",
+    "prinivil": "lisinopril",
+    "zestril": "lisinopril",
+    "claritin": "loratadine",
+    "ativan": "lorazepam",
+    "cozaar": "losartan",
+    "mobic": "meloxicam",
+    "glucophage": "metformin",
+    "lopressor": "metoprolol",
+    "toprol": "metoprolol",
+    "flagyl": "metronidazole",
+    "singulair": "montelukast",
+    "aleve": "naproxen",
+    "prilosec": "omeprazole",
+    "zofran": "ondansetron",
+    "oxycontin": "oxycodone",
+    "percocet": "oxycodone",
+    "protonix": "pantoprazole",
+    "paxil": "paroxetine",
+    "deltasone": "prednisone",
+    "lyrica": "pregabalin",
+    "inderal": "propranolol",
+    "crestor": "rosuvastatin",
+    "zoloft": "sertraline",
+    "zocor": "simvastatin",
+    "aldactone": "spironolactone",
+    "flomax": "tamsulosin",
+    "ultram": "tramadol",
+    "desyrel": "trazodone",
+    "diovan": "valsartan",
+    "effexor": "venlafaxine",
+    "coumadin": "warfarin",
+    "ambien": "zolpidem",
+}
+
+
+def detect_drugs_in_query(
+    query: str, known_drugs: list[str] | None = None
+) -> list[str]:
+    """Extract canonical drug names mentioned in a query.
+
+    Checks generic names first (handling multi-word generics like
+    'insulin glargine'), then known brand/common aliases.
+    """
+    if not query:
+        return []
+
+    clean_q = query.lower()
+    detected: list[str] = []
+
+    # Sort generic names longest-first
+    generics = sorted(known_drugs or DRUG_LIST, key=len, reverse=True)
+    for drug in generics:
+        if re.search(rf"\b{re.escape(drug)}\b", clean_q):
+            if drug not in detected:
+                detected.append(drug)
+
+    # Check brand aliases
+    for alias, canonical in DRUG_ALIASES.items():
+        if re.search(rf"\b{re.escape(alias)}\b", clean_q):
+            if canonical not in detected:
+                detected.append(canonical)
+
+    return detected
+
+
 # ── Hybrid Retriever ───────────────────────────────────────────────────
 
 
@@ -128,25 +237,13 @@ class HybridRetriever:
             rrf_k=rrf_k,
         )
 
-    def retrieve(
+    def _retrieve_single(
         self,
         query: str,
         top_k: int = RETRIEVAL_TOP_K,
         filter_drug: str | None = None,
     ) -> list[RetrievedChunk]:
-        """Retrieve top_k chunks using hybrid vector + BM25 search merged with RRF.
-
-        Args:
-            query: Plain-language user question.
-            top_k: Number of final chunks to return (default 5).
-            filter_drug: Optional drug name to constrain retrieval.
-
-        Returns:
-            List of RetrievedChunk objects ordered by descending RRF score.
-        """
-        if not query or not query.strip():
-            return []
-
+        """Perform hybrid retrieval for a single drug filter (or across all drugs)."""
         clean_query = query.strip()
         n_candidates = max(self.candidate_pool, top_k * 2)
 
@@ -191,7 +288,6 @@ class HybridRetriever:
             if tokens:
                 bm25_scores = self.bm25.get_scores(tokens)
 
-                # Identify eligible candidate indices
                 if filter_drug:
                     target_drug = filter_drug.lower()
                     eligible_indices = [
@@ -202,14 +298,12 @@ class HybridRetriever:
                 else:
                     eligible_indices = list(range(len(self.chunk_map)))
 
-                # Sort eligible candidates by BM25 score
                 sorted_indices = sorted(
                     eligible_indices,
                     key=lambda idx: bm25_scores[idx],
                     reverse=True,
                 )
 
-                # Take top candidates with positive score
                 for rank, idx in enumerate(sorted_indices[:n_candidates], 1):
                     if bm25_scores[idx] > 0 or len(bm25_ranks) < top_k:
                         cid = self.chunk_map[idx]["chunk_id"]
@@ -229,7 +323,6 @@ class HybridRetriever:
             }
 
         if not candidate_ids:
-            logger.warning("No candidate chunks found for query: %s", clean_query)
             return []
 
         scored_candidates: list[tuple[str, float]] = []
@@ -241,7 +334,6 @@ class HybridRetriever:
             )
             scored_candidates.append((cid, score))
 
-        # Sort descending by RRF score
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
 
         # ── 4. Build Output Models ────────────────────────────────────
@@ -266,3 +358,45 @@ class HybridRetriever:
             )
 
         return results
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = RETRIEVAL_TOP_K,
+        filter_drug: str | None = None,
+    ) -> list[RetrievedChunk]:
+        """Retrieve top_k chunks with automatic drug name detection and multi-drug routing.
+
+        - If filter_drug is explicitly passed: search that drug only.
+        - If query detects 1 drug: auto-apply filter to that drug.
+        - If query detects ≥2 drugs: retrieve top chunks for each drug and merge.
+        - If no drug is detected: search across all drugs.
+        """
+        if not query or not query.strip():
+            return []
+
+        if filter_drug:
+            return self._retrieve_single(query, top_k=top_k, filter_drug=filter_drug)
+
+        detected = detect_drugs_in_query(query)
+        if len(detected) == 1:
+            return self._retrieve_single(query, top_k=top_k, filter_drug=detected[0])
+        elif len(detected) >= 2:
+            # Multi-drug query: retrieve for each drug separately and merge
+            per_drug_results = [
+                self._retrieve_single(query, top_k=top_k, filter_drug=d)
+                for d in detected
+            ]
+            merged: list[RetrievedChunk] = []
+            seen_ids: set[str] = set()
+
+            max_len = max((len(r) for r in per_drug_results), default=0)
+            for i in range(max_len):
+                for r in per_drug_results:
+                    if i < len(r) and r[i].chunk_id not in seen_ids:
+                        merged.append(r[i])
+                        seen_ids.add(r[i].chunk_id)
+
+            return merged[:top_k]
+        else:
+            return self._retrieve_single(query, top_k=top_k, filter_drug=None)

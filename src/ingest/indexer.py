@@ -68,7 +68,34 @@ class Chunk:
         return asdict(self)
 
 
-# ── Text Splitting ─────────────────────────────────────────────────────
+# ── Text Cleaning & Splitting ──────────────────────────────────────────
+
+
+def clean_label_text(text: str) -> str:
+    """Strip FDA section cross-reference and citation noise from text.
+
+    Removes patterns like:
+    - [ see Warnings and Precautions (5.1) ]
+    - [see Clinical Pharmacology (12.3) ]
+    - ( 2.1 )
+    - ( 4 , 5.5 , 7.1 )
+    - ( 1 )
+    """
+    if not text:
+        return ""
+
+    # 1. Remove bracketed cross references: [see ...] or [ see ...]
+    cleaned = re.sub(r"\[\s*see\s+[^\]]+\]", "", text, flags=re.IGNORECASE)
+
+    # 2. Remove parenthetical section references: ( 2.1 ), ( 4 , 5.5 , 7.1 ), ( 5.1 )
+    cleaned = re.sub(
+        r"\(\s*\d+(\.\d+)?(?:\s*,\s*\d+(\.\d+)?)*\s*\)", "", cleaned
+    )
+
+    # 3. Clean up extra whitespace around punctuation and multiple spaces
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r" +([.,;:])", r"\1", cleaned)
+    return cleaned.strip()
 
 
 def split_into_sentences(text: str) -> list[str]:
@@ -128,7 +155,11 @@ def chunk_section(
     if not text or not text.strip():
         return []
 
-    raw_sentences = split_into_sentences(text)
+    cleaned_text = clean_label_text(text)
+    if not cleaned_text:
+        return []
+
+    raw_sentences = split_into_sentences(cleaned_text)
     if not raw_sentences:
         return []
 

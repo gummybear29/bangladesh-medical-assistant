@@ -18,6 +18,7 @@ from src.retrieval.hybrid import (
     HybridRetriever,
     RetrievedChunk,
     compute_rrf_score,
+    detect_drugs_in_query,
 )
 
 
@@ -133,6 +134,41 @@ class TestHybridRetrieverUnit:
         results = mock_retriever.retrieve("dose", top_k=5, filter_drug="atorvastatin")
         for r in results:
             assert r.drug_name == "atorvastatin"
+
+    def test_retrieve_auto_applies_single_drug(self, mock_retriever: HybridRetriever):
+        # Query mentioning 'metformin' should auto-filter to metformin
+        results = mock_retriever.retrieve("What is the dose for metformin?", top_k=5)
+        for r in results:
+            assert r.drug_name == "metformin"
+
+    def test_retrieve_multi_drug_merging(self, mock_retriever: HybridRetriever):
+        # Query mentioning two drugs (metformin and atorvastatin)
+        results = mock_retriever.retrieve("Can I take metformin with atorvastatin?", top_k=4)
+        drug_names = {r.drug_name for r in results}
+        assert "metformin" in drug_names
+        assert "atorvastatin" in drug_names
+
+
+# ── Drug Detection Unit Tests ─────────────────────────────────────────
+
+
+class TestDrugDetection:
+    def test_detect_single_generic(self):
+        detected = detect_drugs_in_query("Can I take metformin twice daily?")
+        assert detected == ["metformin"]
+
+    def test_detect_brand_alias(self):
+        detected = detect_drugs_in_query("Is Tylenol safe in pregnancy?")
+        assert detected == ["acetaminophen"]
+
+    def test_detect_multiple_drugs(self):
+        detected = detect_drugs_in_query("Can I take Advil with warfarin?")
+        assert "ibuprofen" in detected
+        assert "warfarin" in detected
+
+    def test_detect_no_drug(self):
+        detected = detect_drugs_in_query("What are common antibiotic interactions?")
+        assert detected == []
 
 
 # ── Integration Test against Live Index ───────────────────────────────

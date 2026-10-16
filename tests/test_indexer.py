@@ -18,6 +18,7 @@ from src.ingest.indexer import (
     build_bm25_index,
     chunk_drug_label,
     chunk_section,
+    clean_label_text,
     count_tokens,
     index_labels,
     split_into_sentences,
@@ -98,6 +99,26 @@ class TestTokenAndSentenceUtils:
     def test_split_into_sentences_empty(self):
         assert split_into_sentences("") == []
         assert split_into_sentences("   \n\t  ") == []
+
+
+# ── Text Cleaning ─────────────────────────────────────────────────────
+
+
+class TestCleanLabelText:
+    def test_strips_bracketed_cross_references(self):
+        text = "Risk of myopathy increases [ see Warnings and Precautions (5.1) ] in older patients."
+        cleaned = clean_label_text(text)
+        assert cleaned == "Risk of myopathy increases in older patients."
+
+    def test_strips_parenthetical_section_citations(self):
+        text = "Initial dose is 10 mg ( 2.1 ). Multiple sections apply ( 4 , 5.5 , 7.1 )."
+        cleaned = clean_label_text(text)
+        assert cleaned == "Initial dose is 10 mg. Multiple sections apply."
+
+    def test_preserves_clinical_numbers(self):
+        text = "Take 500 mg daily for 10 days. eGFR < 30 mL/min."
+        cleaned = clean_label_text(text)
+        assert cleaned == "Take 500 mg daily for 10 days. eGFR < 30 mL/min."
 
 
 # ── Chunking logic ────────────────────────────────────────────────────
