@@ -9,6 +9,19 @@ Features:
 
 from __future__ import annotations
 
+# Hugging Face ZeroGPU compatibility: spaces MUST be imported first before torch/transformers
+try:
+    import spaces
+except Exception:
+    class spaces:  # type: ignore
+        @staticmethod
+        def GPU(fn=None, *args, **kwargs):
+            if fn is None:
+                return lambda f: f
+            if callable(fn):
+                return fn
+            return lambda f: f
+
 import os
 import sys
 from pathlib import Path
@@ -42,6 +55,7 @@ def get_answer_engine():
     return answer_engine
 
 
+@spaces.GPU
 def consult_assistant(
     question: str,
     image: Image.Image | None,
@@ -189,6 +203,11 @@ with gr.Blocks(title="Bangladesh Medical & First-Aid Assistant") as demo:
 
             # Button Actions
             submit_btn.click(
+                fn=consult_assistant,
+                inputs=[q_input, img_input, lang_radio],
+                outputs=ans_output,
+            )
+            q_input.submit(
                 fn=consult_assistant,
                 inputs=[q_input, img_input, lang_radio],
                 outputs=ans_output,
