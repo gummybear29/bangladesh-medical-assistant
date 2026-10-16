@@ -260,3 +260,123 @@ class GeminiClient(LLMClient):
             from_cache=False,
             model=self.model_name,
         )
+
+
+# ── Local Transformers Client (Zero API Key, 100% Offline) ─────────────
+
+
+class LocalTransformersClient(LLMClient):
+    """Local open-source neural LLM client using Hugging Face Transformers.
+    Runs 100% locally on CPU without requiring any API key or external service.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "Qwen/Qwen2.5-0.5B-Instruct",
+        cache_dir: Path = LLM_CACHE_DIR,
+        max_new_tokens: int = 250,
+        temperature: float = 0.2,
+    ) -> None:
+        self.model_name = model_name
+        self.cache_dir = cache_dir
+        self.max_new_tokens = max_new_tokens
+        self.temperature = temperature
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._model = None
+        self._tokenizer = None
+
+    def _get_cache_path(self, prompt: str, system_prompt: str | None) -> Path:
+        cache_input = f"{system_prompt or ''}|||{self.model_name}|||{prompt}"
+        key = hashlib.sha256(cache_input.encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{key}.json"
+
+    def _init_model(self) -> None:
+        if self._model is not None and self._tokenizer is not None:
+            return
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        logger.info("Initializing LocalTransformersClient with %s on CPU...", self.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._model = AutoModelForCausalLM.from_pretrained(
+            self.model_name,
+            dtype=torch.float32,
+        )
+        logger.info("LocalTransformersClient successfully loaded on CPU.")
+
+    def generate(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+    ) -> LLMResponse:
+        # 1. Check local disk cache
+        cache_file = self._get_cache_path(prompt, system_prompt)
+        if cache_file.exists():
+            try:
+                data = json.loads(cache_file.read_text(encoding="utf-8"))
+                return LLMResponse(
+                    text=data["text"],
+                    success=True,
+                    from_cache=True,
+                    model=self.model_name,
+                )
+            except Exception as e:
+                logger.warning("Cache read failed: %s", e)
+
+        # 2. Run inference on CPU
+        try:
+            self._init_model()
+
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
+            text = self._tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            inputs = self._tokenizer([text], return_tensors="pt")
+
+            import torch
+
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=self.max_new_tokens,
+                    do_sample=False,
+                )
+
+            generated_tokens = outputs[:, inputs.input_ids.shape[1] :]
+            response_text = self._tokenizer.batch_decode(
+                generated_tokens,
+                skip_special_tokens=True,
+            )[0].strip()
+
+            # 3. Write to disk cache
+            try:
+                payload = {"text": response_text, "model": self.model_name}
+                cache_file.write_text(
+                    json.dumps(payload, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except Exception as cache_exc:
+                logger.warning("Failed to save LLM cache: %s", cache_exc)
+
+            return LLMResponse(
+                text=response_text,
+                success=True,
+                from_cache=False,
+                model=self.model_name,
+            )
+        except Exception as exc:
+            logger.error("LocalTransformersClient inference error: %s", exc)
+            return LLMResponse(
+                text="",
+                success=False,
+                error=str(exc),
+                from_cache=False,
+                model=self.model_name,
+            )
+

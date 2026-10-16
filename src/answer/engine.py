@@ -29,7 +29,7 @@ from src.config import (
     REVIEW_QUEUE_FILE,
     RRF_K,
 )
-from src.llm.client import FakeLLMClient, GeminiClient, LLMClient, LLMServiceError
+from src.llm.client import FakeLLMClient, GeminiClient, LLMClient, LLMServiceError, LocalTransformersClient
 from src.retrieval.hybrid import (
     HybridRetriever,
     RetrievedChunk,
@@ -218,11 +218,14 @@ class AnswerEngine:
         if llm_client is not None:
             self.llm_client = llm_client
         else:
-            try:
+            if GEMINI_API_KEY:
                 self.llm_client = GeminiClient()
-            except Exception:
-                logger.warning("Falling back to FakeLLMClient for AnswerEngine.")
-                self.llm_client = FakeLLMClient()
+            else:
+                try:
+                    self.llm_client = LocalTransformersClient()
+                except Exception as exc:
+                    logger.warning("LocalTransformersClient unavailable (%s), falling back to FakeLLMClient.", exc)
+                    self.llm_client = FakeLLMClient()
 
         self.abstain_threshold = abstain_threshold
         self.review_queue_file = review_queue_file

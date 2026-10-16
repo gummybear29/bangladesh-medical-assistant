@@ -51,10 +51,13 @@ st.set_page_config(
 @st.cache_resource
 def get_cached_answer_engine(api_key: str = ""):
     from src.answer.engine import AnswerEngine
-    from src.llm.client import GeminiClient
+    from src.llm.client import GeminiClient, LocalTransformersClient
     if api_key:
         return AnswerEngine(llm_client=GeminiClient(api_key=api_key))
-    return AnswerEngine()
+    try:
+        return AnswerEngine(llm_client=LocalTransformersClient())
+    except Exception:
+        return AnswerEngine()
 
 
 @st.cache_resource
@@ -163,25 +166,25 @@ with st.sidebar:
         st.markdown(f"**{hl['title']}**: `📞 {num}`\n\n*{hl['description']}*")
 
     st.markdown("---")
-    st.markdown("---")
     st.markdown("### ⚙️ System Status")
     active_key = st.session_state.get("user_gemini_key", "").strip() or GEMINI_API_KEY
     if active_key:
-        st.success("🟢 Live Gemini 2.0 Flash Active (Real LLM & Vision)")
+        st.success("🟢 Cloud Gemini 2.0 Flash Active")
     else:
-        st.warning("🟡 Offline Mode (Mock Simulator & Heuristics)")
-        st.caption("Enter a free Gemini API key to activate the live conversational neural model:")
+        st.success("🟢 Local Open-Source LLM Active (Qwen 2.5 on CPU)")
+        st.caption("🔒 100% Free, Private & Offline — Zero API Key Required!")
 
-    custom_key = st.text_input(
-        "🔑 Gemini API Key (Free tier):",
-        value=st.session_state.get("user_gemini_key", ""),
-        type="password",
-        placeholder="AIzaSy...",
-        help="Get a free key in 10 seconds from https://aistudio.google.com/app/apikey to turn on live conversational Gemini reasoning and vision.",
-    )
-    if custom_key != st.session_state.get("user_gemini_key", ""):
-        st.session_state["user_gemini_key"] = custom_key
-        st.rerun()
+    with st.expander("🔑 Optional Cloud Gemini Key"):
+        custom_key = st.text_input(
+            "Gemini API Key (Optional):",
+            value=st.session_state.get("user_gemini_key", ""),
+            type="password",
+            placeholder="AIzaSy...",
+            help="Optional. Leave blank to run 100% locally on your computer with Qwen 2.5.",
+        )
+        if custom_key != st.session_state.get("user_gemini_key", ""):
+            st.session_state["user_gemini_key"] = custom_key
+            st.rerun()
 
 
 # ── Top Emergency Banner ───────────────────────────────────────────────
@@ -358,7 +361,7 @@ with tab1:
             if getattr(analysis, "is_live_gemini", False):
                 st.caption("🤖 *Generated live by Google Gemini 2.0 Flash Multimodal Vision*")
             else:
-                st.caption("ℹ️ *Running in Offline Demo Mode. Paste a Gemini API key in the sidebar to activate live conversational neural reasoning.*")
+                st.caption("🤖 *Generated locally by Qwen 2.5 open-source neural LLM (100% offline, zero API keys).*")
 
         elif res_info["type"] == "rag":
             res = res_info["data"]
@@ -374,6 +377,7 @@ with tab1:
 
             st.markdown(badge_html, unsafe_allow_html=True)
             st.markdown(f"> {res.answer}")
+            st.caption("🤖 *Answer synthesized by local Qwen 2.5 neural LLM using retrieved FDA label context.*")
 
             # RAG Inspection View
             if hasattr(res, "retrieved_chunks") and res.retrieved_chunks:

@@ -238,14 +238,32 @@ class MultimodalMedicalAssistant:
                 f"⚠️ *Notice: Image analysis by AI is an initial reference and cannot replace in-person physical clinical examination. For acute symptoms, visit your nearest Upazila Health Complex or Medical College Hospital.*"
             )
         else:
-            text = (
-                f"### 🩺 Medical Guidance & Clinical Information\n\n"
-                f"Question received: *{prompt}*\n\n"
-                f"- For fever and pain relief in Bangladesh, **Paracetamol (Napa / Ace 500 mg)** is the safest first-line medication.\n"
-                f"- For acidity, **Omeprazole (Seclo 20 mg)** or **Pantoprazole (Pantonix 20 mg)** taken before breakfast is widely used.\n"
-                f"- For loose stools, drink **Orsaline-N** (1 packet dissolved in 500 mL clean water) after each bowel movement.\n\n"
-                f"📞 *In any urgent medical situation, dial **999** for emergency ambulance or **16263** for government health helpline.*"
-            )
+            try:
+                from src.llm.client import LocalTransformersClient
+
+                local_client = LocalTransformersClient()
+                sys_msg = (
+                    "You are a medical assistant and first-aid expert serving patients in Bangladesh. "
+                    "Provide clear, safe, evidence-based guidance in a helpful tone. "
+                    "For severe symptoms or emergencies, advise contacting 999 or 16263."
+                )
+                if language == "bn":
+                    sys_msg += " Answer in Bengali (বাংলা)."
+                llm_res = local_client.generate(prompt=prompt, system_prompt=sys_msg)
+                if llm_res.success and llm_res.text:
+                    text = f"### 🩺 Medical Guidance & Clinical Information\n\n{llm_res.text}\n\n⚠️ *For acute medical emergencies in Bangladesh, call 999 or 16263 (Shastho Batayan).*"
+                else:
+                    raise ValueError(llm_res.error or "Empty response")
+            except Exception as e:
+                logger.warning("LocalTransformersClient fallback failed: %s", e)
+                text = (
+                    f"### 🩺 Medical Guidance & Clinical Information\n\n"
+                    f"Question received: *{prompt}*\n\n"
+                    f"- For fever and pain relief in Bangladesh, **Paracetamol (Napa / Ace 500 mg)** is the safest first-line medication.\n"
+                    f"- For acidity, **Omeprazole (Seclo 20 mg)** or **Pantoprazole (Pantonix 20 mg)** taken before breakfast is widely used.\n"
+                    f"- For loose stools, drink **Orsaline-N** (1 packet dissolved in 500 mL clean water) after each bowel movement.\n\n"
+                    f"📞 *In any urgent medical situation, dial **999** for emergency ambulance or **16263** for government health helpline.*"
+                )
 
         return MultimodalAnalysisResult(
             text=text,
