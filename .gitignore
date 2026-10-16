@@ -1,0 +1,23 @@
+# Data
+data/
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Env
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
