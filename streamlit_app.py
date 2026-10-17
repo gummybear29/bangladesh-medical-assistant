@@ -51,10 +51,15 @@ st.set_page_config(
 @st.cache_resource
 def get_cached_answer_engine(api_key: str = ""):
     from src.answer.engine import AnswerEngine
-    from src.llm.client import GeminiClient
+    from src.llm.client import GeminiClient, LocalTransformersClient
     if api_key:
         return AnswerEngine(llm_client=GeminiClient(api_key=api_key))
-    return AnswerEngine()
+    try:
+        return AnswerEngine(llm_client=LocalTransformersClient())
+    except Exception:
+        return AnswerEngine()
+
+
 
 
 
@@ -169,8 +174,10 @@ with st.sidebar:
     if active_key:
         st.success("🟢 Cloud Gemini 2.0 Flash Active")
     else:
-        st.success("🟢 Local Open-Source LLM Active (Qwen 2.5 on CPU)")
-        st.caption("🔒 100% Free, Private & Offline — Zero API Key Required!")
+        st.success("🟢 Neural SLM Active (SmolLM-135M on CPU)")
+        st.caption("🔒 100% Free, Zero GPU, Zero API Keys — 24/7 Cloud Inference!")
+
+
 
     with st.expander("🔑 Optional Cloud Gemini Key"):
         custom_key = st.text_input(
@@ -375,7 +382,9 @@ with tab1:
 
             st.markdown(badge_html, unsafe_allow_html=True)
             st.markdown(f"> {res.answer}")
-            st.caption("🤖 *Answer synthesized by local Qwen 2.5 neural LLM using retrieved FDA label context.*")
+            st.caption("🤖 *Answer synthesized live by SmolLM-135M neural language model using retrieved FDA label context (Zero GPU, Zero API keys).*")
+
+
 
             # RAG Inspection View
             if hasattr(res, "retrieved_chunks") and res.retrieved_chunks:

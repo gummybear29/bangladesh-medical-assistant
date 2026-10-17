@@ -51,10 +51,15 @@ st.set_page_config(
 @st.cache_resource
 def get_cached_answer_engine(api_key: str = ""):
     from src.answer.engine import AnswerEngine
-    from src.llm.client import GeminiClient
+    from src.llm.client import GeminiClient, LocalTransformersClient
     if api_key:
         return AnswerEngine(llm_client=GeminiClient(api_key=api_key))
-    return AnswerEngine()
+    try:
+        return AnswerEngine(llm_client=LocalTransformersClient())
+    except Exception:
+        return AnswerEngine()
+
+
 
 
 

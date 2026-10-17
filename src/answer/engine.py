@@ -30,7 +30,7 @@ from src.config import (
     REVIEW_QUEUE_FILE,
     RRF_K,
 )
-from src.llm.client import FakeLLMClient, GeminiClient, LLMClient, LLMServiceError, LocalTransformersClient
+from src.llm.client import FakeLLMClient, FlanT5Client, GeminiClient, LLMClient, LLMServiceError, LocalTransformersClient
 from src.retrieval.hybrid import (
     HybridRetriever,
     RetrievedChunk,
@@ -228,6 +228,8 @@ class AnswerEngine:
                     logger.warning("LocalTransformersClient unavailable (%s), falling back to FakeLLMClient.", exc)
                     self.llm_client = FakeLLMClient()
 
+
+
         self.abstain_threshold = abstain_threshold
         self.review_queue_file = review_queue_file
 
@@ -258,13 +260,10 @@ class AnswerEngine:
         chunks = self.retriever.retrieve(question_clean, top_k=top_k)
 
         # 2. Vector Cosine Similarity Gating Signal & Drug-Detection Check
-        top_sim = (
-            chunks[0].similarity
-            if (chunks and chunks[0].similarity > 0.0)
-            else max((c.similarity for c in chunks), default=0.0)
-        )
+        top_sim = max((c.similarity for c in chunks), default=0.0) if chunks else 0.0
         confidence_score = round(top_sim, 4)
         confidence = evaluate_confidence(confidence_score)
+
 
         # Drug-detection check: if the query names a drug, top chunk must be from that drug
         detected_drugs = detect_drugs_in_query(question_clean)

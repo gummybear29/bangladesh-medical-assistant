@@ -272,11 +272,12 @@ class LocalTransformersClient(LLMClient):
 
     def __init__(
         self,
-        model_name: str = "Qwen/Qwen2.5-0.5B-Instruct",
+        model_name: str = "HuggingFaceTB/SmolLM-135M-Instruct",
         cache_dir: Path = LLM_CACHE_DIR,
-        max_new_tokens: int = 250,
+        max_new_tokens: int = 150,
         temperature: float = 0.2,
     ) -> None:
+
         self.model_name = model_name
         self.cache_dir = cache_dir
         self.max_new_tokens = max_new_tokens
@@ -382,4 +383,110 @@ class LocalTransformersClient(LLMClient):
                 from_cache=False,
                 model=self.model_name,
             )
+
+
+class FlanT5Client(LLMClient):
+    """Ultra-fast, lightweight CPU neural language model (google/flan-t5-small).
+
+    - 240 MB size, runs on any free cloud CPU (1 core, 512 MB RAM).
+    - 100% Free, zero API keys, runs 24/7 on free cloud hosting.
+    - Specifically trained by Google on question-answering and reading comprehension.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "google/flan-t5-small",
+        cache_dir: Path = LLM_CACHE_DIR,
+        max_new_tokens: int = 150,
+    ) -> None:
+        self.model_name = model_name
+        self.cache_dir = cache_dir
+        self.max_new_tokens = max_new_tokens
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._model = None
+        self._tokenizer = None
+
+    def _get_cache_path(self, prompt: str, system_prompt: str | None) -> Path:
+        cache_input = f"{system_prompt or ''}|||{self.model_name}|||{prompt}"
+        key = hashlib.sha256(cache_input.encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{key}.json"
+
+    def _init_model(self) -> None:
+        if self._model is not None and self._tokenizer is not None:
+            return
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+        logger.info("Initializing FlanT5Client (%s) on CPU...", self.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_name)
+        logger.info("FlanT5Client successfully loaded on CPU.")
+
+    def generate(
+        self,
+        prompt: str,
+        system: str | None = None,
+        system_prompt: str | None = None,
+    ) -> LLMResponse:
+        eff_system = system or system_prompt
+
+        # 1. Check local disk cache
+        cache_file = self._get_cache_path(prompt, eff_system)
+        if cache_file.exists():
+            try:
+                data = json.loads(cache_file.read_text(encoding="utf-8"))
+                return LLMResponse(
+                    text=data["text"],
+                    success=True,
+                    from_cache=True,
+                    model=self.model_name,
+                )
+            except Exception as e:
+                logger.warning("Cache read failed: %s", e)
+
+        # 2. Run inference on CPU
+        try:
+            self._init_model()
+
+            # Sequence-to-sequence prompt
+            seq2seq_prompt = f"Please answer the medical question based on the FDA context.\n\n{prompt}\n\nAnswer:"
+            inputs = self._tokenizer(seq2seq_prompt, return_tensors="pt")
+
+            import torch
+
+            with torch.no_grad():
+                outputs = self._model.generate(
+                    **inputs,
+                    max_new_tokens=self.max_new_tokens,
+                    num_beams=2,
+                    do_sample=False,
+                )
+
+            answer = self._tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+
+            # 3. Write to disk cache
+            try:
+                payload = {"text": answer, "model": self.model_name}
+                cache_file.write_text(
+                    json.dumps(payload, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except Exception as cache_exc:
+                logger.warning("Failed to save LLM cache: %s", cache_exc)
+
+            return LLMResponse(
+                text=answer,
+                success=True,
+                from_cache=False,
+                model=self.model_name,
+            )
+        except Exception as exc:
+            logger.error("FlanT5Client inference error: %s", exc)
+            return LLMResponse(
+                text="",
+                success=False,
+                error=str(exc),
+                from_cache=False,
+                model=self.model_name,
+            )
+
 
