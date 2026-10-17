@@ -372,26 +372,27 @@ with tab1:
                 q_type = msg.get("query_type", "general")
                 conf = msg.get("confidence", "high")
 
-                # Type badge
-                type_labels = {
-                    "identify": "💊 Medicine Identification",
-                    "dosage": "📋 Dosage & Administration",
-                    "side_effects": "⚠️ Adverse Effects & Warnings",
-                    "interactions": "🔄 Drug Interactions",
-                    "alternatives": "🔄 Bangladeshi Brand Alternatives",
-                    "first_aid": "🚑 First-Aid Protocol",
-                    "rag": "📚 FDA Label RAG",
-                }
-                type_badge = type_labels.get(q_type.split("_")[0], "📚 Clinical Information")
-                st.markdown(f'<span class="badge-pill badge-intent">{type_badge}</span>', unsafe_allow_html=True)
+                # Badges for Assistant
+                if conf == "abstained":
+                    st.markdown('<span class="badge-pill badge-intent">🔍 Unverified Medicine Search</span>', unsafe_allow_html=True)
+                    st.markdown('<span class="badge-pill badge-low">🔴 Hallucination Prevention (Strict Grounding)</span>', unsafe_allow_html=True)
+                else:
+                    type_labels = {
+                        "identify": "💊 Medicine Identification",
+                        "dosage": "📋 Dosage & Administration",
+                        "side_effects": "⚠️ Adverse Effects & Warnings",
+                        "interactions": "🔄 Drug Interactions",
+                        "alternatives": "🔄 Bangladeshi Brand Alternatives",
+                        "first_aid": "🚑 First-Aid Protocol",
+                        "rag": "📚 FDA Label RAG",
+                    }
+                    type_badge = type_labels.get(q_type.split("_")[0], "📚 Clinical Information")
+                    st.markdown(f'<span class="badge-pill badge-intent">{type_badge}</span>', unsafe_allow_html=True)
 
-                # Confidence badge
-                if conf == "high":
-                    st.markdown('<span class="badge-pill badge-high">🟢 Grounded in Labeling</span>', unsafe_allow_html=True)
-                elif conf == "medium":
-                    st.markdown('<span class="badge-pill badge-medium">🟡 Moderate Match</span>', unsafe_allow_html=True)
-                elif conf == "abstained":
-                    st.markdown('<span class="badge-pill badge-low">🔴 Abstained (Strict Grounding)</span>', unsafe_allow_html=True)
+                    if conf == "high":
+                        st.markdown('<span class="badge-pill badge-high">🟢 Grounded in Labeling</span>', unsafe_allow_html=True)
+                    elif conf == "medium":
+                        st.markdown('<span class="badge-pill badge-medium">🟡 Moderate Match</span>', unsafe_allow_html=True)
 
             # Main content text
             st.markdown(msg["content"])

@@ -51,6 +51,92 @@ class ChatTurnResponse:
     retrieved_chunks: list[dict[str, Any]] = field(default_factory=list)
 
 
+def build_unrecognized_guidance(query: str, effective_lang: str = "en") -> str:
+    """Generate helpful guidance when a medicine name is not recognized or found in official labeling.
+
+    Informs the user that the drug is not recognized, suggests close matches if any,
+    asks what symptoms/condition they are trying to treat, and provides official online search links.
+    """
+    import difflib
+    import urllib.parse
+    from src.ingest.download import DRUG_LIST
+
+    # Strip conversational prefixes to isolate candidate drug name
+    q_clean = re.sub(
+        r"^(tell me about|what is the dosage of|what is|what are|info on|information about|how to use|side effects of|can i take|how much|what does|dose of|is)\s+",
+        "",
+        query.strip(),
+        flags=re.IGNORECASE,
+    ).strip(" ?.,!\"'")
+
+    # Build known names vocabulary
+    all_names: dict[str, str] = {}
+    for k, v in BANGLADESH_BRANDS.items():
+        all_names[k.lower()] = f"{v.brand_name} ({v.generic_name.title()}) — {v.common_uses}"
+        all_names[v.generic_name.lower()] = f"{v.generic_name.title()} (Generic Active Ingredient)"
+    for d in DRUG_LIST:
+        if d.lower() not in all_names:
+            all_names[d.lower()] = f"{d.title()} (Generic Active Ingredient)"
+
+    # Find close matches for the full cleaned phrase or individual words
+    words = [w for w in re.split(r"\s+", q_clean) if len(w) >= 3]
+    matches: list[tuple[str, str]] = []
+    for cand in [q_clean] + words:
+        cand_clean = re.sub(r"\d+", "", cand).strip().lower()
+        if len(cand_clean) >= 3:
+            close = difflib.get_close_matches(cand_clean, list(all_names.keys()), n=3, cutoff=0.55)
+            for m in close:
+                if m not in [x[0] for x in matches]:
+                    matches.append((m, all_names[m]))
+
+    top_matches = matches[:3]
+    encoded_display = q_clean if q_clean else query.strip()
+    encoded_q = urllib.parse.quote_plus(encoded_display)
+
+    if effective_lang == "bn":
+        suggestions_md = ""
+        if top_matches:
+            sug_items = "\n".join([f"- **{display}**" for _, display in top_matches])
+            suggestions_md = f"#### 🔍 আপনি কি নিচের কোনো ওষুধের কথা জানতে চেয়েছেন?\n{sug_items}\n\n"
+        else:
+            suggestions_md = "অফিসিয়াল তালিকায় এর কাছাকাছি কোনো ওষুধ পাওয়া যায়নি (দয়া করে প্রেসক্রিপশন বা প্যাকেটের বানানটি পুনরায় যাচাই করুন)।\n\n"
+
+        return (
+            f"### ⚠️ ওষুধটি অফিসিয়াল তালিকায় পাওয়া যায়নি (Information Not Found in Official Drug Labeling)\n\n"
+            f"**\"{encoded_display}\"** কোনো অফিসিয়াল এফডিএ (FDA) অনুমোদিত বা বাংলাদেশ ডিজিডিএ (DGDA) নিবন্ধিত ওষুধ হিসেবে পাওয়া যায়নি।\n\n"
+            f"{suggestions_md}"
+            f"#### 💬 আপনাকে কীভাবে সাহায্য করতে পারি?\n"
+            f"- **আপনার কী সমস্যা বা লক্ষণ হচ্ছে?** (যেমনঃ জ্বর, মাথাব্যথা, পেটব্যথা, গ্যাস্ট্রিক, ইনফেকশন ইত্যাদি — আপনার লক্ষণ জানালে সঠিক নির্দেশনা দেওয়া যাবে)।\n"
+            f"- আপনার কাছে ওষুধের পাতা বা প্রেসক্রিপশন থাকলে উপরের **📷 ক্যামেরা অপশন** দিয়ে ছবি আপলোড করতে পারেন।\n\n"
+            f"#### 🌐 অনলাইনে ওষুধটি যাচাই করার অফিসিয়াল লিংক:\n"
+            f"- 🔍 [ডেইলিমেড (FDA DailyMed Database) এ খুঁজুন](https://dailymed.nlm.nih.gov/dailymed/search.cfm?labeltype=all&query={encoded_q})\n"
+            f"- 🔍 [মেডেক্স বাংলাদেশ (Medex BD DGDA Directory) এ খুঁজুন](https://medex.com.bd/search?q={encoded_q})\n"
+            f"- 🔍 [মেডলাইন প্লাস (MedlinePlus NIH Drug Information)](https://medlineplus.gov/druginformation.html)\n"
+            f"- 📞 **বিনামূল্যে সরকারি ডাক্তার সেবা**: ২৪/৭ কল করুন **১৬২৬৩** (স্বাস্থ্য বাতায়ন) অথবা জরুরি অ্যাম্বুলেন্সের জন্য **৯৯৯**।"
+        )
+    else:
+        suggestions_md = ""
+        if top_matches:
+            sug_items = "\n".join([f"- **{display}**" for _, display in top_matches])
+            suggestions_md = f"#### 🔍 Did you mean one of these medications?\n{sug_items}\n\n"
+        else:
+            suggestions_md = "No close pharmaceutical matches were found in official directories (please double-check the spelling on your prescription or packaging).\n\n"
+
+        return (
+            f"### ⚠️ Medication Not Recognized in Official Registries (Information Not Found in Official Drug Labeling)\n\n"
+            f"**\"{encoded_display}\"** is **not a recognized medication** in official FDA-approved package inserts or Directorate General of Drug Administration (DGDA) Bangladesh listings.\n\n"
+            f"{suggestions_md}"
+            f"#### 💬 How can I help you find what you need?\n"
+            f"- **What symptoms or medical condition are you looking to treat?** (e.g., headache, fever, cough, gastric acidity, infection, or body pain? Tell me what you're experiencing and I can point you to verified medical guidance).\n"
+            f"- **Have packaging or a prescription?** You can upload a photo of the medicine strip or bottle using the camera expander above for visual OCR identification.\n\n"
+            f"#### 🌐 Direct Online Search & Clinical Resources:\n"
+            f"- 🔍 [Search DailyMed (Official US FDA Drug Database)](https://dailymed.nlm.nih.gov/dailymed/search.cfm?labeltype=all&query={encoded_q})\n"
+            f"- 🔍 [Search Medex Bangladesh (DGDA Medicine Index)](https://medex.com.bd/search?q={encoded_q})\n"
+            f"- 🔍 [Search MedlinePlus (U.S. National Library of Medicine)](https://medlineplus.gov/druginformation.html)\n"
+            f"- 📞 **24/7 Bangladesh Medical Helpline**: Dial **16263** (Shastho Batayan — free doctor consultation) or **999** for emergency ambulance."
+        )
+
+
 class ConversationalMedicalAssistant:
     """Multi-turn medical conversational assistant with safety guardrails."""
 
@@ -309,20 +395,7 @@ class ConversationalMedicalAssistant:
 
         # Strict Grounding Check: If abstained or score is low
         if rag_res.abstained or rag_res.confidence == "low":
-            if effective_lang == "bn":
-                not_found_msg = (
-                    f"⚠️ **অফিসিয়াল লেবেলিংয়ে তথ্য পাওয়া যায়নি (Not Found in Official Labeling)**\n\n"
-                    f"আপনার প্রশ্ন: *\"{user_message}\"*\n\n"
-                    f"কঠোর রোগী নিরাপত্তার স্বার্থে, অফিসিয়াল এফডিএ (FDA) ওষুধ প্যাকেজ নির্দেশিকায় সুনির্দিষ্ট তথ্য না থাকলে এই সিস্টেম কোনো অনুমানভিত্তিক উত্তর প্রদান করে না। "
-                    f"সঠিক নির্দেশনা ও প্রেসক্রিপশনের জন্য অনুগ্রহ করে বিএমডিসি (BMDC) নিবন্ধিত চিকিৎসকের পরামর্শ নিন বা ১৬২৬৩ নম্বরে কল করুন।"
-                )
-            else:
-                not_found_msg = (
-                    f"⚠️ **Information Not Found in Official Drug Labeling**\n\n"
-                    f"Query evaluated: *\"{user_message}\"*\n\n"
-                    f"Under strict clinical grounding rules, this assistant abstains when facts cannot be verified directly from official package inserts. "
-                    f"To prevent harmful hallucinations, no unstated details are fabricated. Please consult a registered physician or pharmacist for medical advice."
-                )
+            not_found_msg = build_unrecognized_guidance(user_message, effective_lang=effective_lang)
             return ChatTurnResponse(
                 reply_text=not_found_msg,
                 confidence="abstained",
