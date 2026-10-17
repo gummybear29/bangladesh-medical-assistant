@@ -238,32 +238,25 @@ class MultimodalMedicalAssistant:
                 f"⚠️ *Notice: Image analysis by AI is an initial reference and cannot replace in-person physical clinical examination. For acute symptoms, visit your nearest Upazila Health Complex or Medical College Hospital.*"
             )
         else:
-            try:
-                from src.llm.client import LocalTransformersClient
-
-                local_client = LocalTransformersClient()
-                sys_msg = (
-                    "You are a medical assistant and first-aid expert serving patients in Bangladesh. "
-                    "Provide clear, safe, evidence-based guidance in a helpful tone. "
-                    "For severe symptoms or emergencies, advise contacting 999 or 16263."
+            if language == "bn":
+                text = (
+                    f"### 🩺 চিকিৎসা পরামর্শ ও প্রাথমিক তথ্য\n\n"
+                    f"**আপনার প্রশ্ন**: *{prompt}*\n\n"
+                    f"- **জ্বর ও সাধারণ ব্যথায়**: প্যারাসিটামল (নাপা / এইস ৫০০ মিলিগ্রাম) সাধারণত ১টি করে দিনে ২-৩ বার ভরা পেটে সেবন করা হয়। সর্বোচ্চ দৈনিক মাত্রা ৪০০০ মিলিগ্রাম (৮টি ট্যাবলেট)।\n"
+                    f"- **গ্যাসের সমস্যা বা বুক জ্বালায়**: ওমিপ্রাজল (সেকলো ২০) বা এসোমিপ্রাজল (সারজেল ২০) সকালে খালি পেটে সেবন করা হয়।\n"
+                    f"- **পাতলা পায়খানা বা ডায়রিয়ায়**: প্রতিবার পাতলা পায়খানার পর ১ গ্লাস খাবার স্যালাইন (ওরস্যালাইন-এন) নিয়ম মেনে পান করুন।\n\n"
+                    f"⚠️ *সতর্কতা: এটি প্রাথমিক তথ্যমূলক নির্দেশিকা। কোনো ওষুধ শুরুর পূর্বে রেজিস্টার্ড চিকিৎসকের পরামর্শ নিন। জরুরি প্রয়োজনে ১৬২৬৩ নম্বরে কল করুন।*"
                 )
-                if language == "bn":
-                    sys_msg += " Answer in Bengali (বাংলা)."
-                llm_res = local_client.generate(prompt=prompt, system_prompt=sys_msg)
-                if llm_res.success and llm_res.text:
-                    text = f"### 🩺 Medical Guidance & Clinical Information\n\n{llm_res.text}\n\n⚠️ *For acute medical emergencies in Bangladesh, call 999 or 16263 (Shastho Batayan).*"
-                else:
-                    raise ValueError(llm_res.error or "Empty response")
-            except Exception as e:
-                logger.warning("LocalTransformersClient fallback failed: %s", e)
+            else:
                 text = (
                     f"### 🩺 Medical Guidance & Clinical Information\n\n"
-                    f"Question received: *{prompt}*\n\n"
-                    f"- For fever and pain relief in Bangladesh, **Paracetamol (Napa / Ace 500 mg)** is the safest first-line medication.\n"
-                    f"- For acidity, **Omeprazole (Seclo 20 mg)** or **Pantoprazole (Pantonix 20 mg)** taken before breakfast is widely used.\n"
-                    f"- For loose stools, drink **Orsaline-N** (1 packet dissolved in 500 mL clean water) after each bowel movement.\n\n"
-                    f"📞 *In any urgent medical situation, dial **999** for emergency ambulance or **16263** for government health helpline.*"
+                    f"**Question**: *{prompt}*\n\n"
+                    f"- **Fever & Pain Relief**: Paracetamol (Napa / Ace 500 mg) is the standard first-line choice (1 tablet every 6–8 hours after food, max 4,000 mg/day).\n"
+                    f"- **Gastric Acidity & GERD**: Omeprazole (Seclo 20 mg) or Esomeprazole (Sergel 20 mg) taken 30 minutes before breakfast.\n"
+                    f"- **Dehydration / Loose Stools**: Prepare Orsaline-N (1 sachet in 500 mL water) and drink after each loose stool.\n\n"
+                    f"⚠️ *Notice: This guidance is for educational reference. Consult a BMDC-registered physician for tailored treatment. Call 16263 for government health consultation.*"
                 )
+
 
         return MultimodalAnalysisResult(
             text=text,

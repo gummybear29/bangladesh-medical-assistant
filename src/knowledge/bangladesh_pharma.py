@@ -475,10 +475,41 @@ BANGLADESH_BRAND_TO_GENERIC: dict[str, str] = {
 def lookup_bangladesh_brand(query: str) -> BangladeshDrugInfo | None:
     """Find a Bangladesh drug info record matching the query string."""
     q_lower = query.strip().lower()
-    for brand_key, info in BANGLADESH_BRANDS.items():
-        if re.search(rf"\b{re.escape(brand_key)}\b", q_lower):
-            return info
+
+    # 1. Check Bengali brand names first (longer names first)
+    bengali_to_brand = {
+        "নাপা এক্সট্রা": "napa extra",
+        "নাপা": "napa",
+        "এইস প্লাস": "ace plus",
+        "এইস": "ace",
+        "ফাস্ট": "fast",
+        "রেনোভা": "renova",
+        "সেকলো": "seclo",
+        "সারজেল": "sergel",
+        "সারজিল": "sergel",
+        "প্যান্টোনিক্স": "pantonix",
+        "প্যান্টোবেক্স": "pantobex",
+        "আলাট্রোল": "alatrol",
+        "অ্যালাট্রোল": "alatrol",
+        "ওরস্যালাইন": "orsaline-n",
+        "স্যালাইন": "orsaline-n",
+        "মোনাস": "monas",
+        "মন্টিন": "montene",
+        "জিমেক্স": "zimax",
+        "প্যারাসিটামল": "napa",
+    }
+    for bn_name, brand_key in sorted(bengali_to_brand.items(), key=lambda x: len(x[0]), reverse=True):
+        if bn_name in q_lower:
+            return BANGLADESH_BRANDS.get(brand_key)
+
+    # 2. Check English brand keys (longer names first)
+    sorted_brands = sorted(BANGLADESH_BRANDS.keys(), key=len, reverse=True)
+    for brand_key in sorted_brands:
+        if re.search(rf"\b{re.escape(brand_key)}\b", q_lower) or brand_key in q_lower:
+            return BANGLADESH_BRANDS[brand_key]
+
     return None
+
 
 
 def get_canonical_generic_from_local_query(query: str) -> str | None:
