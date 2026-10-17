@@ -375,7 +375,13 @@ with tab1:
                 # Badges for Assistant
                 if conf == "abstained":
                     st.markdown('<span class="badge-pill badge-intent">🔍 Unverified Medicine Search</span>', unsafe_allow_html=True)
-                    st.markdown('<span class="badge-pill badge-low">🔴 Hallucination Prevention (Strict Grounding)</span>', unsafe_allow_html=True)
+                    st.markdown('<span class="badge-pill badge-low">🛡️ Safe Grounding (Unverified)</span>', unsafe_allow_html=True)
+                elif q_type == "conversation":
+                    st.markdown('<span class="badge-pill badge-intent">💬 Medical Conversation</span>', unsafe_allow_html=True)
+                    st.markdown('<span class="badge-pill badge-high">🟢 Neural SLM Active</span>', unsafe_allow_html=True)
+                elif q_type == "general_health":
+                    st.markdown('<span class="badge-pill badge-intent">🩺 General Health Guidance</span>', unsafe_allow_html=True)
+                    st.markdown('<span class="badge-pill badge-high">🟢 Neural SLM Active</span>', unsafe_allow_html=True)
                 else:
                     type_labels = {
                         "identify": "💊 Medicine Identification",
@@ -392,7 +398,7 @@ with tab1:
                     if conf == "high":
                         st.markdown('<span class="badge-pill badge-high">🟢 Grounded in Labeling</span>', unsafe_allow_html=True)
                     elif conf == "medium":
-                        st.markdown('<span class="badge-pill badge-medium">🟡 Moderate Match</span>', unsafe_allow_html=True)
+                        st.markdown('<span class="badge-pill badge-medium">🟡 Clinical Assessment</span>', unsafe_allow_html=True)
 
             # Main content text
             st.markdown(msg["content"])

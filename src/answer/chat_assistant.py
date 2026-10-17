@@ -51,7 +51,7 @@ class ChatTurnResponse:
     retrieved_chunks: list[dict[str, Any]] = field(default_factory=list)
 
 
-def build_unrecognized_guidance(query: str, effective_lang: str = "en") -> str:
+def build_unrecognized_guidance(query: str, effective_lang: str = "en", llm_client: Any | None = None) -> str:
     """Generate helpful guidance when a medicine name is not recognized or found in official labeling.
 
     Informs the user that the drug is not recognized, suggests close matches if any,
@@ -93,6 +93,26 @@ def build_unrecognized_guidance(query: str, effective_lang: str = "en") -> str:
     encoded_display = q_clean if q_clean else query.strip()
     encoded_q = urllib.parse.quote_plus(encoded_display)
 
+    # Let the SLM generate a conversational note if available
+    slm_voice = ""
+    if llm_client is not None:
+        try:
+            slm_prompt = (
+                f"The user inquired about '{encoded_display}'. This medication name is not found in official FDA package inserts or Bangladesh DGDA directories. "
+                f"In 2 brief conversational sentences, let the user know that this medication is not in official registries, "
+                f"suggest checking the spelling or packaging, and ask what symptoms they are experiencing so you can help."
+            )
+            slm_resp = llm_client.generate(prompt=slm_prompt)
+            if slm_resp.success and slm_resp.text.strip():
+                clean_txt = slm_resp.text.strip()
+                clean_txt = re.sub(r"\[Your Name\]|\[Your Company/Organization\]|\[specific topic or industry\]", "Bangladesh Medical Assistant", clean_txt)
+                clean_txt = re.sub(r"^(here\s+(is|are)\s+[^:\n]*:?\s*)+", "", clean_txt, flags=re.IGNORECASE).strip()
+                first_part = clean_txt.split("Sincerely,")[0].split("\n\n")[0].strip()
+                if len(first_part) > 15:
+                    slm_voice = f"> 🤖 **Assistant**: *\"{first_part}\"*\n\n"
+        except Exception:
+            pass
+
     if effective_lang == "bn":
         suggestions_md = ""
         if top_matches:
@@ -104,6 +124,7 @@ def build_unrecognized_guidance(query: str, effective_lang: str = "en") -> str:
         return (
             f"### ⚠️ ওষুধটি অফিসিয়াল তালিকায় পাওয়া যায়নি (Information Not Found in Official Drug Labeling)\n\n"
             f"**\"{encoded_display}\"** কোনো অফিসিয়াল এফডিএ (FDA) অনুমোদিত বা বাংলাদেশ ডিজিডিএ (DGDA) নিবন্ধিত ওষুধ হিসেবে পাওয়া যায়নি।\n\n"
+            f"{slm_voice}"
             f"{suggestions_md}"
             f"#### 💬 আপনাকে কীভাবে সাহায্য করতে পারি?\n"
             f"- **আপনার কী সমস্যা বা লক্ষণ হচ্ছে?** (যেমনঃ জ্বর, মাথাব্যথা, পেটব্যথা, গ্যাস্ট্রিক, ইনফেকশন ইত্যাদি — আপনার লক্ষণ জানালে সঠিক নির্দেশনা দেওয়া যাবে)।\n"
@@ -125,6 +146,7 @@ def build_unrecognized_guidance(query: str, effective_lang: str = "en") -> str:
         return (
             f"### ⚠️ Medication Not Recognized in Official Registries (Information Not Found in Official Drug Labeling)\n\n"
             f"**\"{encoded_display}\"** is **not a recognized medication** in official FDA-approved package inserts or Directorate General of Drug Administration (DGDA) Bangladesh listings.\n\n"
+            f"{slm_voice}"
             f"{suggestions_md}"
             f"#### 💬 How can I help you find what you need?\n"
             f"- **What symptoms or medical condition are you looking to treat?** (e.g., headache, fever, cough, gastric acidity, infection, or body pain? Tell me what you're experiencing and I can point you to verified medical guidance).\n"
@@ -532,6 +554,62 @@ class ConversationalMedicalAssistant:
                 confidence="high",
                 sources=[],
                 query_type="out_of_scope",
+            )
+
+        # Guardrail 8b: Conversational Greetings & Model Dialogue ("just let the slm talk", "hi", "how are you")
+        is_conversational_turn = bool(
+            re.search(
+                r"^(hi|hello|hey|hola|greetings|good\s*(morning|afternoon|evening|day)|"
+                r"how\s*are\s*you|who\s*are\s*you|what\s*are\s*you|what\s*can\s*you\s*do|"
+                r"can\s*you\s*talk|talk\s*to\s*me|let\s*the\s*slm\s*talk|just\s*let\s*the\s*slm\s*talk|"
+                r"can\s*we\s*talk|can\s*we\s*chat|tell\s*me\s*about\s*yourself|"
+                r"কেমন\s*আছেন|হ্যালো|হাই|নমস্কার|কে\s*আছো|তুমি\s*কে|আপনি\s*কে|কথা\s*বলো)[\s\W]*$",
+                q_lower,
+            )
+            or q_lower in ("hi", "hello", "hey", "hola", "sup", "yo", "good morning", "good evening", "howdy")
+            or any(phrase in q_lower for phrase in ["let the slm talk", "let the model talk", "just talk", "can you talk", "talk to me", "who are you", "what can you do", "introduce yourself"])
+        )
+        if is_conversational_turn:
+            system_conv = (
+                "You are a friendly, compassionate, and professional Bangladesh Medical & Drug Assistant (সহকারী). "
+                "Respond warmly, conversationally, and helpfully. Introduce yourself, explain that you are active and ready "
+                "to assist with medicines, dosages, side effects, drug interactions, Bangladeshi brand alternatives (like Napa, Seclo), "
+                "and first aid. Ask how you can help them with their health or medications today."
+            )
+            slm_text = ""
+            try:
+                slm_res = self.engine.llm_client.generate(prompt=user_message, system=system_conv)
+                if slm_res.success and slm_res.text.strip():
+                    slm_text = slm_res.text.strip()
+                    slm_text = re.sub(r"\[Your Name\]|\[Your Company/Organization\]|\[specific topic or industry\]", "Bangladesh Medical Assistant", slm_text)
+                    slm_text = slm_text.split("Sincerely,")[0].strip()
+            except Exception:
+                slm_text = ""
+
+            if not slm_text or len(slm_text) < 15:
+                slm_text = (
+                    "Hello! I am your Bangladesh Medical & Drug Assistant. I'm active and ready to talk with you! "
+                    "I can help you look up medicine details, verify dosages and safety precautions, compare Bangladeshi brands, "
+                    "or provide emergency first-aid protocols. What would you like to discuss today?"
+                    if effective_lang != "bn"
+                    else "নমস্কার! আমি আপনার বাংলাদেশ মেডিকেল ও ওষুধ সহকারী। আমি আপনার সাথে কথা বলতে ও সাহায্য করতে প্রস্তুত! "
+                    "ওষুধ পরিচিতি, সেবনবিধি, পার্শ্বপ্রতিক্রিয়া বা জরুরি প্রাথমিক চিকিৎসা সংক্রান্ত যেকোনো বিষয়ে আমাকে জানাতে পারেন। আজ আপনাকে কীভাবে সাহায্য করতে পারি?"
+                )
+
+            reply_text = (
+                f"👋 {slm_text}\n\n"
+                f"💡 *You can ask me about medicine identification (e.g. Napa, Seclo), recommended dosages, side effects, "
+                f"drug interactions, or Bangladeshi brand alternatives.*"
+                if effective_lang != "bn"
+                else f"👋 {slm_text}\n\n"
+                f"💡 *আপনি যেকোনো ওষুধের তথ্য, সেবনবিধি, পার্শ্বপ্রতিক্রিয়া, ড্রাগ ইন্টারঅ্যাকশন বা বিকল্প ব্র্যান্ড সম্পর্কে জিজ্ঞাসা করতে পারেন।*"
+            )
+            return ChatTurnResponse(
+                reply_text=reply_text,
+                confidence="high",
+                sources=[],
+                safety_alerts=safety_alerts,
+                query_type="conversation",
             )
 
         # Guardrail 9: Clinical Comparison — Napa vs Seclo (H8)
@@ -1007,7 +1085,56 @@ class ConversationalMedicalAssistant:
 
         # Strict Grounding Check: If abstained or score is low
         if rag_res.abstained or rag_res.confidence == "low":
-            not_found_msg = build_unrecognized_guidance(user_message, effective_lang=effective_lang)
+            # Check if this is a general symptom / self-care / health inquiry without an unrecognized candidate medicine
+            symptom_keywords = {
+                "fever", "headache", "cough", "cold", "pain", "stomach", "dizzy", "dizziness",
+                "vomit", "vomiting", "nausea", "tired", "fatigue", "sleep", "insomnia", "diet",
+                "nutrition", "water", "hydration", "dehydration", "exercise", "feel", "feeling",
+                "symptom", "symptoms", "advice", "what to do", "tips", "prevention", "help me",
+                "sick", "ill", "illness", "health", "জ্বর", "মাথাব্যথা", "কাশি", "বমি", "পেটব্যথা", "দুর্বল", "ক্লান্ত", "পরামর্শ"
+            }
+            words = [w.strip("?,.!\"'") for w in q_lower.split() if len(w) >= 3]
+            drug_suffixes = ("vir", "mab", "xib", "fen", "ril", "lol", "statin", "prazole", "mycin", "cillin", "zepam", "zolam", "lukast", "tinib", "ine", "ide")
+            has_candidate_drug = any(w.endswith(drug_suffixes) for w in words) or any(re.search(r"\d+", w) for w in words) or any(p in q_lower for p in ["tell me about", "what is the dose", "dosage of", "brand", "tablet", "capsule", "mg", "pill", "medicine", "drug"])
+            has_symptom = any(k in q_lower for k in symptom_keywords)
+
+            if has_symptom and not has_candidate_drug and not active_drug:
+                system_health = (
+                    "You are a compassionate, qualified clinical medical assistant for Bangladesh. "
+                    "Provide safe, supportive, evidence-based self-care advice and guidance for the described symptoms or wellness inquiry. "
+                    "Advise when they should see a doctor, and provide Bangladesh healthcare helpline 16263 (Shastho Batayan)."
+                )
+                slm_resp = self.engine.llm_client.generate(prompt=user_message, system=system_health)
+                slm_text = slm_resp.text.strip() if slm_resp.success else ""
+                if slm_text:
+                    slm_text = re.sub(r"\[Your Name\]|\[Your Company/Organization\]|\[specific topic or industry\]", "Bangladesh Medical Assistant", slm_text)
+                    slm_text = slm_text.split("Sincerely,")[0].strip()
+
+                if not slm_text or len(slm_text) < 20:
+                    slm_text = (
+                        "For general symptoms, ensure adequate rest and proper fluid intake. Monitor your condition closely, "
+                        "and consult a registered healthcare provider if symptoms persist or worsen."
+                        if effective_lang != "bn"
+                        else "সাধারণ উপসর্গের ক্ষেত্রে পর্যাপ্ত বিশ্রাম ও তরল খাবার গ্রহণ করুন। লক্ষণ বৃদ্ধি পেলে রেজিস্টার্ড চিকিৎসকের পরামর্শ নিন।"
+                    )
+
+                return ChatTurnResponse(
+                    reply_text=(
+                        f"### 🩺 Clinical Health Guidance (স্বাস্থ্য নির্দেশনা)\n\n"
+                        f"{slm_text}\n\n"
+                        f"📞 **24/7 Bangladesh Medical Helpline**: Call **16263** (Shastho Batayan — free doctor consultation) | **999** for emergency ambulance.\n\n"
+                        f"⚠️ *This information is for general educational awareness and does not replace evaluation by a registered physician.*"
+                    ),
+                    confidence="medium",
+                    sources=[{"title": "DGHS Health Information & Clinical Guidelines", "url": "https://dghs.gov.bd"}],
+                    safety_alerts=safety_alerts,
+                    active_drug=None,
+                    query_type="general_health",
+                    retrieved_chunks=rag_res.retrieved_chunks,
+                )
+
+            # Unrecognized drug query -> build_unrecognized_guidance with SLM voice
+            not_found_msg = build_unrecognized_guidance(user_message, effective_lang=effective_lang, llm_client=self.engine.llm_client)
             return ChatTurnResponse(
                 reply_text=not_found_msg,
                 confidence="abstained",
