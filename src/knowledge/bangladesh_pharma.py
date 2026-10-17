@@ -141,6 +141,18 @@ BANGLADESH_BRANDS: dict[str, BangladeshDrugInfo] = {
         bengali_uses="জ্বর এবং ব্যথা",
         otc=True,
     ),
+    "paracetamol": BangladeshDrugInfo(
+        brand_name="Paracetamol",
+        generic_name="paracetamol",
+        manufacturer="Multiple DGDA Manufacturers (Beximco, Square, Incepta)",
+        strength="500 mg / 665 mg",
+        dosage_form="Tablet / Syrup / Suspension / Suppository",
+        common_uses="Fever, headache, body aches, mild to moderate pain",
+        bengali_generic="প্যারাসিটামল",
+        bengali_uses="জ্বর, মাথাব্যথা, শরীর ব্যথা",
+        otc=True,
+        warning="Max 4,000 mg in 24 hours. Avoid alcohol. In Dengue, use ONLY Paracetamol.",
+    ),
 
     # Gastric / Acid Suppressants (PPIs)
     "seclo": BangladeshDrugInfo(
@@ -421,6 +433,8 @@ BANGLADESH_BRAND_TO_GENERIC: dict[str, str] = {
     "reset": "acetaminophen",
     "fevnil": "acetaminophen",
     "paracitemol": "acetaminophen",  # Typo support
+    "parasetamol": "acetaminophen",
+    "nappa": "acetaminophen",
     "paracetamol": "acetaminophen",
     "প্যারাসিটামল": "acetaminophen",
     "নাপা": "acetaminophen",
@@ -428,6 +442,7 @@ BANGLADESH_BRAND_TO_GENERIC: dict[str, str] = {
 
     # Omeprazole / PPIs
     "seclo": "omeprazole",
+    "seclow": "omeprazole",
     "losectil": "omeprazole",
     "omecon": "omeprazole",
     "সার্জেল": "omeprazole",
@@ -559,7 +574,8 @@ def is_emergency_query(query: str) -> tuple[bool, str]:
         (r"\b(severe\s*burn|আগুনে\s*পুড়ে|third\s*degree\s*burn|বিদ্যুৎস্পৃষ্ট|electrocution)\b", "severe_burn"),
         (r"\b(dengue\s*bleeding|প্লাটিলেট\s*কমে|রক্তক্ষরণ|কালো\s*পায়খানা|dengue\s*shock|bleeding\s*heavily|massive\s*bleeding|hemorrhage|প্রচুর\s*রক্তপাত)\b", "severe_bleeding"),
         (r"\b(severe\s*choking|গলায়\s*আটকে|দম\s*নিতে\s*পারছে\s*না)\b", "choking"),
-        (r"\b(poison|বিষ\s*খেয়েছে|কীটনাশক|হারপিক|bleach\s*poisoning)\b", "poisoning"),
+        (r"\b(poison|বিষ\s*খেয়েছে|কীটনাশক|হারপিক|bleach\s*poisoning|swallowed\s+\d+|swallowed\s+many|overdose|বিষপান|পিল\s*খেয়ে|ওষুধ\s*খেয়ে\s*ফেলেছে)\b", "poisoning"),
+        (r"\b(how to overdose|self[- ]harm|commit suicide|kill myself|ways to die|মরতে\s*চাই|আত্মহত্যা)\b", "self_harm"),
     ]
     for pattern, reason in emergency_patterns:
         if re.search(pattern, q_lower):
@@ -567,7 +583,7 @@ def is_emergency_query(query: str) -> tuple[bool, str]:
     return False, ""
 
 
-def find_brand_alternatives(brand_or_generic: str) -> list[BangladeshDrugInfo]:
+def find_brand_alternatives(brand_or_generic: str, exclude_brand: str | None = None) -> list[BangladeshDrugInfo]:
     """Find all alternative Bangladeshi pharmaceutical brands sharing the same generic molecule."""
     q_clean = brand_or_generic.strip().lower()
 
@@ -575,6 +591,7 @@ def find_brand_alternatives(brand_or_generic: str) -> list[BangladeshDrugInfo]:
         "paracetamol": "paracetamol",
         "acetaminophen": "paracetamol",
         "paracitemol": "paracetamol",
+        "parasetamol": "paracetamol",
         "প্যারাসিটামল": "paracetamol",
         "omeprazole": "omeprazole",
         "সেক্লো": "omeprazole",
@@ -627,8 +644,14 @@ def find_brand_alternatives(brand_or_generic: str) -> list[BangladeshDrugInfo]:
 
     alternatives: list[BangladeshDrugInfo] = []
     seen_brands: set[str] = set()
+    excl = exclude_brand.lower().strip() if exclude_brand else None
 
     for brand_key, drug in BANGLADESH_BRANDS.items():
+        # Avoid listing generic placeholder "Paracetamol" as an alternative brand
+        if drug.brand_name.lower() == "paracetamol":
+            continue
+        if excl and (excl == brand_key.lower() or excl == drug.brand_name.lower()):
+            continue
         drug_gen = GENERIC_SYNONYMS.get(drug.generic_name.lower(), drug.generic_name.lower())
         if drug_gen == target_generic and drug.brand_name.lower() not in seen_brands:
             seen_brands.add(drug.brand_name.lower())

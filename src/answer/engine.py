@@ -265,23 +265,49 @@ class AnswerEngine:
         confidence = evaluate_confidence(confidence_score)
 
 
-        # Drug-detection check: if the query names a drug, top chunk must be from that drug
+        # Drug-detection and strict grounding check:
+        # 1. If query explicitly names a known drug, top chunk must match that drug.
+        # 2. If query explicitly names an unknown drug entity (like remdesivir, zanotrilex, parexil),
+        #    and it is not the chunk's drug or alias, we must abstain.
+        from src.knowledge.bangladesh_pharma import BANGLADESH_BRAND_TO_GENERIC
+
+        top_drug = chunks[0].drug_name.lower() if chunks else ""
+        top_drug_aliases = {top_drug}
+        if top_drug in ("paracetamol", "acetaminophen"):
+            top_drug_aliases.update({"paracetamol", "acetaminophen", "napa", "ace", "fast", "reset", "renova"})
+        for brand, gen in BANGLADESH_BRAND_TO_GENERIC.items():
+            if gen.lower() == top_drug:
+                top_drug_aliases.add(brand.lower())
+
+        q_tokens = [w.strip("?,.!\"'") for w in question_clean.split() if len(w) >= 5]
+        drug_suffix = re.compile(r"(vir|mab|xib|fen|ril|lol|statin|prazole|mycin|cillin|zepam|zolam|lukast|tinib|gliflozin|gliptin|triptan|azole|dopa|ine|ide|ate)$", re.IGNORECASE)
+        unknown_drug_in_query = False
+        for tok in q_tokens:
+            tok_lower = tok.lower()
+            if tok_lower in ("tablets", "capsule", "dosage", "recommended", "random", "compound", "medicine", "guidance", "active", "ingredient"):
+                continue
+            if drug_suffix.search(tok) or (tok[0].isupper() and tok.lower() not in ("what", "which", "could", "would", "should", "please", "system", "ignore", "answer")):
+                if tok_lower not in top_drug_aliases and not detect_drugs_in_query(tok_lower):
+                    unknown_drug_in_query = True
+                    break
+
         detected_drugs = detect_drugs_in_query(question_clean)
         drug_mismatch = False
         if detected_drugs and chunks:
             detected_set = {d.lower() for d in detected_drugs}
-            top_drug = chunks[0].drug_name.lower()
             if top_drug not in detected_set:
                 drug_mismatch = True
+        elif unknown_drug_in_query:
+            drug_mismatch = True
 
         # 3. Confidence Gating (Abstain if below threshold, empty chunks, or drug mismatch)
         if not chunks or confidence_score < self.abstain_threshold or drug_mismatch:
             reason = (
-                "drug_detection_mismatch"
-                if drug_mismatch
+                "retrieval_confidence_below_threshold"
+                if confidence_score < self.abstain_threshold and chunks
                 else (
-                    "retrieval_confidence_below_threshold"
-                    if chunks
+                    "drug_detection_mismatch"
+                    if drug_mismatch
                     else "no_chunks_retrieved"
                 )
             )
