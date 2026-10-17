@@ -33,6 +33,29 @@ if str(PROJECT_ROOT) not in sys.path:
 from PIL import Image
 import gradio as gr
 
+# Hotfix: gradio_client on HF ZeroGPU crashes when additionalProperties is a
+# boolean (True) instead of a dict — "if 'const' in schema" raises TypeError.
+try:
+    import gradio_client.utils as _gc_utils
+
+    _orig_json_schema = getattr(_gc_utils, "_json_schema_to_python_type", None)
+    if _orig_json_schema:
+        def _patched_json_schema(schema, defs=None):
+            if not isinstance(schema, dict):
+                return "Any"
+            return _orig_json_schema(schema, defs)
+        _gc_utils._json_schema_to_python_type = _patched_json_schema
+
+    _orig_get_type = getattr(_gc_utils, "get_type", None)
+    if _orig_get_type:
+        def _patched_get_type(schema):
+            if not isinstance(schema, dict):
+                return "Any"
+            return _orig_get_type(schema)
+        _gc_utils.get_type = _patched_get_type
+except Exception:
+    pass
+
 from src.answer.engine import AnswerEngine
 from src.firstaid.triage import FIRST_AID_PROTOCOLS, find_first_aid_protocol
 from src.knowledge.bangladesh_pharma import (
