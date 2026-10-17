@@ -256,44 +256,101 @@ class ConversationalMedicalAssistant:
         is_interactions_intent = any(w in q_lower for w in ["interaction", "take with", "together with", "with", "mix", "একসাথে", "মিশিয়ে", "খাওয়া যাবে", "খাওয়া যায়"])
 
         # 3. Intent Detection: Bangladeshi Brand Alternatives
-        is_alternative_intent = bool(re.search(r"\b(alternative|alternatives|substitute|substitutes|other brands?|বিকল্প|অন্য ব্র্যান্ড)\b", q_lower))
-        if is_alternative_intent and active_drug:
-            alternatives = find_brand_alternatives(active_drug)
-            if alternatives:
-                target_generic = alternatives[0].generic_name.title()
-                alt_lines = []
-                for alt in alternatives:
-                    otc_text = "OTC (প্রেসক্রিপশন ছাড়া)" if alt.otc else "Prescription (প্রেসক্রিপশন আবশ্যক)"
-                    alt_lines.append(f"- **{alt.brand_name}** ({alt.strength}, {alt.dosage_form}) — *{alt.manufacturer}* | `{otc_text}`")
-                
-                alt_list_str = "\n".join(alt_lines)
-                if effective_lang == "bn":
-                    reply = (
-                        f"### 💊 বাংলাদেশে **{active_drug.title()}** ({target_generic})-এর সমমানের ব্র্যান্ডসমূহ:\n\n"
-                        f"এদের সবার মূল সক্রিয় উপাদান একই ({target_generic}):\n\n"
-                        f"{alt_list_str}\n\n"
-                        f"⚠️ *একটি ব্র্যান্ড পরিবর্তন করার পূর্বে আপনার ফার্মাসিস্ট বা চিকিৎসকের সাথে মাত্রা (strength) নিশ্চিত করুন।*"
+        is_alternative_intent = bool(
+            re.search(
+                r"(\b(alternative|alternatives|substitute|substitutes|বিকল্প|অন্য ব্র্যান্ড|অন্যান্য ব্র্যান্ড)\b)"
+                r"|(\b(other|all|different|more|available|local|list)\s+(bangladeshi\s+)?brands?\b)"
+                r"|(\b(list|show|name|tell me|what are)\s+(the\s+|all\s+|other\s+)?(bangladeshi\s+)?brands?\b)"
+                r"|(\bbrands?\s+(of|for|sharing|like|in)\b)",
+                q_lower,
+            )
+        )
+        if is_alternative_intent:
+            target_drug = active_drug
+            detected = detect_drugs_in_query(combined_input)
+            bd_match = lookup_bangladesh_brand(combined_input)
+            canon = get_canonical_generic_from_local_query(combined_input)
+            if detected:
+                target_drug = detected[0]
+            elif bd_match:
+                target_drug = bd_match.generic_name
+            elif canon:
+                target_drug = canon
+            elif not target_drug:
+                for g in [
+                    "paracetamol",
+                    "acetaminophen",
+                    "omeprazole",
+                    "esomeprazole",
+                    "pantoprazole",
+                    "cetirizine",
+                    "fexofenadine",
+                    "montelukast",
+                    "metformin",
+                    "azithromycin",
+                    "ciprofloxacin",
+                    "amoxicillin",
+                    "cefixime",
+                ]:
+                    if re.search(rf"\b{g}\b", q_lower):
+                        target_drug = g
+                        break
+
+            if target_drug:
+                alternatives = find_brand_alternatives(target_drug)
+                if alternatives:
+                    target_generic = alternatives[0].generic_name.title()
+                    alt_lines = []
+                    for alt in alternatives:
+                        otc_text = "OTC (প্রেসক্রিপশন ছাড়া)" if alt.otc else "Prescription (প্রেসক্রিপশন আবশ্যক)"
+                        alt_lines.append(f"- **{alt.brand_name}** ({alt.strength}, {alt.dosage_form}) — *{alt.manufacturer}* | `{otc_text}`")
+                    
+                    alt_list_str = "\n".join(alt_lines)
+                    if effective_lang == "bn":
+                        reply = (
+                            f"### 💊 বাংলাদেশে **{target_drug.title()}** ({target_generic})-এর সমমানের ব্র্যান্ডসমূহ:\n\n"
+                            f"- **মূল সক্রিয় উপাদান (Active Molecule)**: {target_generic}\n\n"
+                            f"এদের সবার মূল উপাদান একই ({target_generic}):\n\n"
+                            f"{alt_list_str}\n\n"
+                            f"⚠️ *একটি ব্র্যান্ড পরিবর্তন করার পূর্বে আপনার ফার্মাসিস্ট বা চিকিৎসকের সাথে মাত্রা (strength) নিশ্চিত করুন।*"
+                        )
+                    else:
+                        reply = (
+                            f"### 💊 Bangladeshi Brand Alternatives for **{target_drug.title()}**:\n\n"
+                            f"- **Active Molecule**: {target_generic}\n\n"
+                            f"These medications share the identical active pharmaceutical ingredient ({target_generic}):\n\n"
+                            f"{alt_list_str}\n\n"
+                            f"⚠️ *Always verify the exact strength (e.g. 500 mg vs 650 mg) with a registered pharmacist before substituting.*"
+                        )
+                    return ChatTurnResponse(
+                        reply_text=reply,
+                        confidence="high",
+                        sources=[{"title": f"DGDA Bangladesh National Formulary ({target_generic})", "url": "https://dgda.gov.bd"}],
+                        safety_alerts=safety_alerts,
+                        active_drug=target_drug,
+                        query_type="alternatives",
                     )
-                else:
-                    reply = (
-                        f"### 💊 Bangladeshi Brand Alternatives for **{active_drug.title()}** ({target_generic}):\n\n"
-                        f"These medications share the identical active pharmaceutical ingredient ({target_generic}):\n\n"
-                        f"{alt_list_str}\n\n"
-                        f"⚠️ *Always verify the exact strength (e.g. 500 mg vs 650 mg) with a registered pharmacist before substituting.*"
-                    )
-                return ChatTurnResponse(
-                    reply_text=reply,
-                    confidence="high",
-                    sources=[{"title": f"Bangladesh National Formulary ({target_generic})", "url": "https://dgda.gov.bd"}],
-                    safety_alerts=safety_alerts,
-                    active_drug=active_drug,
-                    query_type="alternatives",
-                )
 
         # 4. Intent Detection: Brand Identification / Packaging Query
         bd_brand = lookup_bangladesh_brand(combined_input)
+
+        logger.info(
+            "Query routing debug: %s",
+            {
+                "lang": effective_lang,
+                "entity": active_drug,
+                "match": bd_brand.brand_name if bd_brand else None,
+                "intent": "alternatives" if is_alternative_intent else ("identify" if bd_brand else "evaluating"),
+            },
+        )
         is_id_inquiry = any(w in q_lower for w in ["identify", "what is", "generic", "কার ওষুধ", "কী ওষুধ", "কি ওষুধ", "কিসের", "কাজ কি", "কাজ কী", "জেনেরিক", "পরিচয়", "ব্যবহার", "বিস্তারিত", "ঔষধ"]) or extracted_ocr
-        if bd_brand and (is_id_inquiry or (not is_dosage_intent and not is_side_effects_intent and not is_interactions_intent)):
+        is_short_brand_inquiry = False
+        if bd_brand:
+            word_count = len([w for w in re.split(r"\s+", q_lower) if w])
+            if word_count <= 6:
+                is_short_brand_inquiry = True
+
+        if bd_brand and (is_id_inquiry or is_short_brand_inquiry or (not is_dosage_intent and not is_side_effects_intent and not is_interactions_intent)):
             active_drug = bd_brand.generic_name
             ocr_note = f"> 📷 *OCR identified text from packaging*: `{extracted_ocr[:90]}`\n\n" if extracted_ocr else ""
             if effective_lang == "bn":

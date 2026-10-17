@@ -80,3 +80,30 @@ def test_strict_grounding_abstention(mock_assistant: ConversationalMedicalAssist
     res = mock_assistant.respond("What is the dosage of fictitiousexplodium for dragon fever?")
     assert res.confidence == "abstained"
     assert "Information Not Found in Official Drug Labeling" in res.reply_text
+
+
+def test_regression_seclo_bengali_short(mock_assistant: ConversationalMedicalAssistant) -> None:
+    res = mock_assistant.respond("Seclo কী?")
+    assert res.query_type == "identify"
+    assert "Omeprazole" in res.reply_text or "ওমিপ্রাজল" in res.reply_text
+
+
+def test_regression_seclo_alone(mock_assistant: ConversationalMedicalAssistant) -> None:
+    res = mock_assistant.respond("Seclo")
+    assert res.query_type == "identify"
+    assert "Omeprazole" in res.reply_text or "ওমিপ্রাজল" in res.reply_text
+
+
+def test_regression_list_brands_of_paracetamol(mock_assistant: ConversationalMedicalAssistant) -> None:
+    res = mock_assistant.respond("list brands of paracetamol")
+    assert res.query_type == "alternatives"
+    assert "Paracetamol" in res.reply_text
+    # Must list at least 2 registered Bangladeshi brands (e.g. Napa, Ace, Fast, Renova)
+    brand_count = sum(1 for brand in ["Napa", "Ace", "Fast", "Renova"] if brand in res.reply_text)
+    assert brand_count >= 2
+
+
+def test_regression_zentrovex_abstain(mock_assistant: ConversationalMedicalAssistant) -> None:
+    res = mock_assistant.respond("Tell me about Zentrovex 250")
+    assert res.confidence == "abstained"
+    assert "not a recognized medication" in res.reply_text.lower()

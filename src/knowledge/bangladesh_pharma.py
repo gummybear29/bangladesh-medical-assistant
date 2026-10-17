@@ -484,32 +484,58 @@ def lookup_bangladesh_brand(query: str) -> BangladeshDrugInfo | None:
         "এইস": "ace",
         "ফাস্ট": "fast",
         "রেনোভা": "renova",
+        "সেক্লো": "seclo",
         "সেকলো": "seclo",
+        "সার্জেল": "sergel",
         "সারজেল": "sergel",
         "সারজিল": "sergel",
         "প্যান্টোনিক্স": "pantonix",
         "প্যান্টোবেক্স": "pantobex",
+        "প্যানটোড্যাক": "pantodac",
+        "ট্রুপ্যান": "trupan",
+        "ম্যাক্সপ্রো": "maxpro",
+        "নেক্সাম": "nexum",
+        "লোসেকটিল": "losectil",
         "আলাট্রোল": "alatrol",
         "অ্যালাট্রোল": "alatrol",
+        "ওরস্যালাইন-এন": "orsaline-n",
         "ওরস্যালাইন": "orsaline-n",
         "স্যালাইন": "orsaline-n",
         "মোনাস": "monas",
         "মন্টিন": "montene",
         "জিমেক্স": "zimax",
-        "প্যারাসিটামল": "napa",
+        "সিপ্রোসিন": "ciprocin",
+        "মক্সাসিল": "moxacil",
+        "সেফ-৩": "cef-3",
+        "কমেট": "comet",
+        "ইনফরমেট": "informet",
+        "রিসেট": "reset",
     }
     for bn_name, brand_key in sorted(bengali_to_brand.items(), key=lambda x: len(x[0]), reverse=True):
         if bn_name in q_lower:
             return BANGLADESH_BRANDS.get(brand_key)
 
-    # 2. Check English brand keys (longer names first)
+    # 2. Check English brand keys with strict word boundary (avoiding false substrings like 'ace' in 'paracetamol')
     sorted_brands = sorted(BANGLADESH_BRANDS.keys(), key=len, reverse=True)
     for brand_key in sorted_brands:
-        if re.search(rf"\b{re.escape(brand_key)}\b", q_lower) or brand_key in q_lower:
+        if re.search(rf"\b{re.escape(brand_key)}\b", q_lower):
             return BANGLADESH_BRANDS[brand_key]
 
-    return None
+    # 3. Check individual tokens extracted from query (handles mixed-script like "Seclo কী ওষুধ?")
+    tokens = [re.sub(r"[^\w\-]", "", w) for w in re.split(r"\s+", q_lower) if w]
+    for t in tokens:
+        if t in BANGLADESH_BRANDS:
+            return BANGLADESH_BRANDS[t]
 
+    # 4. Fuzzy match on Latin tokens with length >= 4 (allows slight typos like 'secloo', 'alatroll')
+    import difflib
+    latin_tokens = [t for t in tokens if re.match(r"^[a-z0-9_\-]+$", t) and len(t) >= 4]
+    for lt in latin_tokens:
+        close = difflib.get_close_matches(lt, list(BANGLADESH_BRANDS.keys()), n=1, cutoff=0.82)
+        if close:
+            return BANGLADESH_BRANDS[close[0]]
+
+    return None
 
 
 def get_canonical_generic_from_local_query(query: str) -> str | None:
@@ -544,23 +570,57 @@ def is_emergency_query(query: str) -> tuple[bool, str]:
 def find_brand_alternatives(brand_or_generic: str) -> list[BangladeshDrugInfo]:
     """Find all alternative Bangladeshi pharmaceutical brands sharing the same generic molecule."""
     q_clean = brand_or_generic.strip().lower()
-    target_generic = None
 
-    # Check if query directly matches a brand
-    info = lookup_bangladesh_brand(q_clean)
-    if info:
-        target_generic = info.generic_name.lower()
+    GENERIC_SYNONYMS: dict[str, str] = {
+        "paracetamol": "paracetamol",
+        "acetaminophen": "paracetamol",
+        "paracitemol": "paracetamol",
+        "প্যারাসিটামল": "paracetamol",
+        "omeprazole": "omeprazole",
+        "সেক্লো": "omeprazole",
+        "সেকলো": "omeprazole",
+        "ওমিপ্রাজল": "omeprazole",
+        "esomeprazole": "esomeprazole",
+        "এসোমিপ্রাজল": "esomeprazole",
+        "pantoprazole": "pantoprazole",
+        "প্যান্টোপ্রাজল": "pantoprazole",
+        "cetirizine": "cetirizine",
+        "সিটিরিজিন": "cetirizine",
+        "fexofenadine": "fexofenadine",
+        "azithromycin": "azithromycin",
+        "অ্যাজিথ্রোমাইসিন": "azithromycin",
+        "ciprofloxacin": "ciprofloxacin",
+        "সিপ্রোফ্লক্সাসিন": "ciprofloxacin",
+        "amoxicillin": "amoxicillin",
+        "অ্যামোক্সিসিলিন": "amoxicillin",
+        "cefixime": "cefixime",
+        "montelukast": "montelukast",
+        "মন্টেলুকাস্ট": "montelukast",
+        "metformin": "metformin",
+        "মেটফরমিন": "metformin",
+    }
+
+    target_generic: str | None = None
+
+    # Check direct generic match or synonym first
+    if q_clean in GENERIC_SYNONYMS:
+        target_generic = GENERIC_SYNONYMS[q_clean]
     else:
-        # Check canonical mapping
-        canonical = get_canonical_generic_from_local_query(q_clean)
-        if canonical:
-            target_generic = canonical.lower()
+        # Check if query matches a known brand
+        info = lookup_bangladesh_brand(q_clean)
+        if info:
+            raw_gen = info.generic_name.lower()
+            target_generic = GENERIC_SYNONYMS.get(raw_gen, raw_gen)
         else:
-            # Check if query itself is generic name
-            for drug in BANGLADESH_BRANDS.values():
-                if drug.generic_name.lower() == q_clean:
-                    target_generic = q_clean
-                    break
+            # Check canonical mapping
+            canonical = get_canonical_generic_from_local_query(q_clean)
+            if canonical:
+                target_generic = GENERIC_SYNONYMS.get(canonical.lower(), canonical.lower())
+            else:
+                for drug in BANGLADESH_BRANDS.values():
+                    if drug.generic_name.lower() == q_clean:
+                        target_generic = q_clean
+                        break
 
     if not target_generic:
         return []
@@ -569,7 +629,8 @@ def find_brand_alternatives(brand_or_generic: str) -> list[BangladeshDrugInfo]:
     seen_brands: set[str] = set()
 
     for brand_key, drug in BANGLADESH_BRANDS.items():
-        if drug.generic_name.lower() == target_generic and drug.brand_name.lower() not in seen_brands:
+        drug_gen = GENERIC_SYNONYMS.get(drug.generic_name.lower(), drug.generic_name.lower())
+        if drug_gen == target_generic and drug.brand_name.lower() not in seen_brands:
             seen_brands.add(drug.brand_name.lower())
             alternatives.append(drug)
 
