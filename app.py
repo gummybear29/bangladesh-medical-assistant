@@ -278,4 +278,4 @@ with gr.Blocks(title="Bangladesh Medical & First-Aid Assistant", css=custom_css)
     )
 
 if __name__ == "__main__":
-    demo.launch(ssr_mode=False)
+    demo.launch(share=True, ssr_mode=False)
