@@ -140,23 +140,38 @@ class MultimodalMedicalAssistant:
         warning = ""
         emergency_level = "STANDARD"
 
-        # Check for Bangladesh brands
-        bd_info = lookup_bangladesh_brand(prompt)
-
-        # Build Response Content
+        # 1. If an image is provided, run lightweight OCR to extract printed medicine packaging text
+        extracted_text = ""
         if image is not None:
             w, h = image.size
             img_desc = f"Image dimensions: {w}x{h} px"
             identified.append("Uploaded Medical Image")
+            try:
+                import pytesseract
+                raw_ocr = pytesseract.image_to_string(image).strip()
+                if raw_ocr:
+                    extracted_text = raw_ocr
+                    identified.append(f"Extracted Text: {extracted_text[:60]}...")
+            except Exception as ocr_err:
+                logger.info("OCR engine not available or no text found: %s", ocr_err)
         else:
             img_desc = "Text-only query"
+
+        # Combine user prompt with extracted image text for clinical matching
+        search_corpus = f"{prompt} {extracted_text}".strip()
+
+        # Check for Bangladesh brands in prompt or extracted image text
+        bd_info = lookup_bangladesh_brand(search_corpus)
 
         if bd_info:
             identified.append(f"{bd_info.brand_name} ({bd_info.generic_name}) - {bd_info.manufacturer}")
             warning = bd_info.warning or "Follow package instructions."
+            ocr_banner = f"> 📷 **Image OCR Detected**: *\"{extracted_text[:120]}\"*\n\n" if extracted_text else ""
             if language == "bn":
                 text = (
+                    f"{ocr_banner}"
                     f"### 💊 ওষুধ পরিচিতি: {bd_info.brand_name}\n\n"
+
                     f"- **মূল উপাদান (Generic)**: {bd_info.bengali_generic} ({bd_info.generic_name.title()})\n"
                     f"- **প্রস্তুতকারক**: {bd_info.manufacturer}\n"
                     f"- **মাত্রা (Strength)**: {bd_info.strength}\n"
@@ -185,7 +200,8 @@ class MultimodalMedicalAssistant:
         # Check first-aid categories
         from src.firstaid.triage import find_first_aid_protocol
 
-        protocol = find_first_aid_protocol(prompt)
+        protocol = find_first_aid_protocol(search_corpus)
+
         if protocol:
             identified.append(protocol.title_en)
             emergency_level = "EMERGENCY" if protocol.urgency_level == "EMERGENCY_CRITICAL" else "WARNING"
