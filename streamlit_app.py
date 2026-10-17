@@ -1,12 +1,13 @@
 """Bangladesh Medical, First-Aid & Drug Assistant (সহকারী).
 
 Features:
-- Multimodal Image Upload: Analyze medicine strips, prescriptions, wounds, burns, and rashes.
-- Bangladesh First-Aid Triage Protocols: Dengue fever, burns, snakebites, ORS, bleeding, choking.
-- Bangladesh Pharma Directory: Search Napa, Ace, Seclo, Sergel, Pantonix, Alatrol, Zimax, etc.
-- 24/7 Bangladesh Emergency Hotlines: 999, 16263 (Shastho Batayan), DMC Poison Center.
-- Bilingual support: 🇬🇧 English and 🇧🇩 বাংলা.
-- In-memory cached inference with sub-second response times.
+- Conversational Chat Interface with Context Memory & Follow-up Resolution.
+- Multi-intent clinical routing: Identification, Dosage, Side Effects, Interactions, BD Brand Alternatives.
+- Strict Grounding: Answers only from retrieved FDA label text, explicitly returns 'Not Found' otherwise.
+- Multi-tier Safety Layer: Persistent Disclaimers & Emergency/Pregnancy/Pediatric Escalations.
+- Verifiable Citations with direct DailyMed package insert and DGDA links under every answer.
+- Optional Multimodal Image Upload: OCR packaging analysis for medicine blister packs & prescriptions.
+- 100% Free & Open-Source: Runs 24/7 on Streamlit Cloud with zero GPU & zero API keys required.
 """
 
 from __future__ import annotations
@@ -15,76 +16,61 @@ import io
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
-# Add project root to sys.path so app can run standalone
+# Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PIL import Image
-import requests
 import streamlit as st
 
+from src.answer.chat_assistant import (
+    ChatTurnResponse,
+    ConversationalMedicalAssistant,
+    SafetyAlert,
+)
 from src.config import DISCLAIMER_TEXT, GEMINI_API_KEY
 from src.firstaid.triage import FIRST_AID_PROTOCOLS, find_first_aid_protocol
 from src.knowledge.bangladesh_pharma import (
     BANGLADESH_BRANDS,
     BANGLADESH_EMERGENCY_HOTLINES,
+    find_brand_alternatives,
     lookup_bangladesh_brand,
 )
-from src.llm.multimodal import MultimodalMedicalAssistant
-from src.retrieval.hybrid import detect_drugs_in_query
-
-API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/ask")
 
 st.set_page_config(
-    page_title="Bangladesh Medical & First Aid Assistant",
+    page_title="Bangladesh Medical Assistant (সহকারী)",
     page_icon="🇧🇩",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-
-# ── In-Memory Caching for Sub-Second Responses ────────────────────────
-
-
-@st.cache_resource
-def get_cached_answer_engine(api_key: str = ""):
-    from src.answer.engine import AnswerEngine
-    from src.llm.client import GeminiClient, LocalTransformersClient
-    if api_key:
-        return AnswerEngine(llm_client=GeminiClient(api_key=api_key))
-    try:
-        return AnswerEngine(llm_client=LocalTransformersClient())
-    except Exception:
-        return AnswerEngine()
-
-
-
-
-
-@st.cache_resource
-def get_cached_multimodal_assistant(api_key: str = ""):
-    effective_key = api_key or GEMINI_API_KEY
-    return MultimodalMedicalAssistant(api_key=effective_key)
-
-
-# ── Custom CSS ─────────────────────────────────────────────────────────
+# ── Custom CSS for Modern Clinical Look ───────────────────────────────
 
 st.markdown(
     """
     <style>
     .emergency-banner {
-        background: linear-gradient(90deg, #DC2626 0%, #B91C1C 100%);
+        background: linear-gradient(90deg, #DC2626 0%, #991B1B 100%);
         color: white;
         padding: 10px 18px;
         border-radius: 8px;
         font-weight: 600;
-        margin-bottom: 20px;
+        margin-bottom: 16px;
         display: flex;
         justify-content: space-between;
         align-items: center;
         box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.2);
+    }
+    .hotline-chip {
+        background-color: white;
+        color: #DC2626;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-weight: 700;
+        margin: 0 3px;
     }
     .main-title {
         font-size: 2.1rem;
@@ -93,62 +79,127 @@ st.markdown(
         margin-bottom: 0.1rem;
     }
     .sub-title {
-        font-size: 1.05rem;
+        font-size: 1.0rem;
         color: #475569;
-        margin-bottom: 1.2rem;
+        margin-bottom: 1.0rem;
     }
-    .card-box {
-        background: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 16px;
-        margin-bottom: 16px;
+    .badge-pill {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 9999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-right: 6px;
+        margin-bottom: 8px;
     }
     .badge-high {
         background-color: #DCFCE7;
         color: #15803D;
-        padding: 4px 12px;
-        border-radius: 9999px;
-        font-size: 0.85rem;
-        font-weight: 600;
+        border: 1px solid #86EFAC;
     }
     .badge-medium {
         background-color: #FEF9C3;
         color: #A16207;
-        padding: 4px 12px;
-        border-radius: 9999px;
-        font-size: 0.85rem;
-        font-weight: 600;
+        border: 1px solid #FDE047;
     }
     .badge-low {
         background-color: #FEE2E2;
         color: #B91C1C;
-        padding: 4px 12px;
-        border-radius: 9999px;
-        font-size: 0.85rem;
-        font-weight: 600;
+        border: 1px solid #FCA5A5;
     }
-    .review-notice {
+    .badge-intent {
         background-color: #EFF6FF;
-        border-left: 4px solid #3B82F6;
-        padding: 10px 14px;
-        border-radius: 0 8px 8px 0;
-        font-size: 0.9rem;
-        color: #1E40AF;
-        margin-top: 12px;
+        color: #1D4ED8;
+        border: 1px solid #BFDBFE;
     }
-    .hotline-chip {
-        background-color: white;
-        color: #DC2626;
-        padding: 3px 10px;
-        border-radius: 6px;
-        font-weight: 700;
-        margin: 0 4px;
+    .safety-alert-card {
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        font-size: 0.92rem;
+    }
+    .alert-emergency {
+        background-color: #FEF2F2;
+        border-left: 5px solid #DC2626;
+        color: #991B1B;
+    }
+    .alert-pregnancy {
+        background-color: #FFFBEB;
+        border-left: 5px solid #D97706;
+        color: #92400E;
+    }
+    .alert-pediatric {
+        background-color: #EFF6FF;
+        border-left: 5px solid #2563EB;
+        color: #1E40AF;
+    }
+    .context-focus-bar {
+        background-color: #F1F5F9;
+        border: 1px solid #CBD5E1;
+        border-radius: 8px;
+        padding: 8px 14px;
+        margin-bottom: 12px;
+        font-size: 0.88rem;
+        color: #334155;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+# ── In-Memory Resource Caching ─────────────────────────────────────────
+
+
+@st.cache_resource
+def get_cached_chat_assistant(api_key: str = ""):
+    from src.answer.engine import AnswerEngine
+    from src.llm.client import GeminiClient, LocalTransformersClient
+
+    if api_key:
+        engine = AnswerEngine(llm_client=GeminiClient(api_key=api_key))
+    else:
+        try:
+            engine = AnswerEngine(llm_client=LocalTransformersClient())
+        except Exception:
+            engine = AnswerEngine()
+    return ConversationalMedicalAssistant(answer_engine=engine)
+
+
+# ── Session State Initialization ───────────────────────────────────────
+
+if "messages" not in st.session_state:
+    st.session_state["messages"] = [
+        {
+            "role": "assistant",
+            "content": (
+                "👋 **Hello! I am your Bangladesh Medical & Drug Assistant (সহকারী).**\n\n"
+                "I am designed to assist you like a medical consultation companion with conversation memory:\n\n"
+                "- 🔍 **Identify medicines**: Ask about brand names (Napa, Seclo, Alatrol) or upload packaging photos.\n"
+                "- 📋 **Dosage & Administration**: Official instructions from verified drug labels.\n"
+                "- ⚠️ **Side effects & Precautions**: Known adverse reactions and safety warnings.\n"
+                "- 🔄 **Interactions**: Ask follow-ups like *'Can I take this with paracetamol?'*\n"
+                "- 💊 **Bangladeshi Alternatives**: Find all locally registered brands sharing the generic active molecule.\n"
+                "- 🚑 **First-Aid Protocols**: Dengue fever, snakebites, burns, dehydration, and bone trauma.\n\n"
+                "⚠️ *Strict Grounding Rule: All pharmaceutical information is verified against official FDA & DGDA package inserts. When evidence is not documented, I explicitly abstain rather than fabricate answers.*"
+            ),
+            "sources": [],
+            "safety_alerts": [],
+            "active_drug": None,
+            "query_type": "welcome",
+            "retrieved_chunks": [],
+        }
+    ]
+
+if "active_drug" not in st.session_state:
+    st.session_state["active_drug"] = None
+
+if "pending_query" not in st.session_state:
+    st.session_state["pending_query"] = None
+
 
 # ── Sidebar ────────────────────────────────────────────────────────────
 
@@ -177,19 +228,35 @@ with st.sidebar:
         st.success("🟢 Neural SLM Active (SmolLM-135M on CPU)")
         st.caption("🔒 100% Free, Zero GPU, Zero API Keys — 24/7 Cloud Inference!")
 
-
-
-    with st.expander("🔑 Optional Cloud Gemini Key"):
+    with st.expander("🔑 Optional Gemini Key"):
         custom_key = st.text_input(
             "Gemini API Key (Optional):",
             value=st.session_state.get("user_gemini_key", ""),
             type="password",
             placeholder="AIzaSy...",
-            help="Optional. Leave blank to run 100% locally on your computer with Qwen 2.5.",
+            help="Optional. Leave blank to run 100% free with the open-source CPU model.",
         )
         if custom_key != st.session_state.get("user_gemini_key", ""):
             st.session_state["user_gemini_key"] = custom_key
             st.rerun()
+
+    st.markdown("---")
+    if st.button("🗑️ Reset Chat / নতুন কথোপকথন", use_container_width=True):
+        st.session_state["messages"] = [
+            {
+                "role": "assistant",
+                "content": "Conversation memory reset. How can I assist you with medicines or first-aid today?"
+                if not is_bengali
+                else "কথোপকথনের মেমোরি রিসেট করা হয়েছে। আজ আপনাকে কীভাবে সাহায্য করতে পারি?",
+                "sources": [],
+                "safety_alerts": [],
+                "active_drug": None,
+                "query_type": "welcome",
+                "retrieved_chunks": [],
+            }
+        ]
+        st.session_state["active_drug"] = None
+        st.rerun()
 
 
 # ── Top Emergency Banner ───────────────────────────────────────────────
@@ -206,198 +273,203 @@ st.markdown(
 # ── Title & Intro ──────────────────────────────────────────────────────
 
 if is_bengali:
-    st.markdown('<div class="main-title">🇧🇩 বাংলাদেশ প্রাথমিক চিকিৎসা ও ওষুধ নির্দেশিকা</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">ওষুধের ছবি, প্রেসক্রিপশন বা আঘাতের ছবি আপলোড করুন এবং তাৎক্ষণিক নিরাপদ প্রাথমিক চিকিৎসা পরামর্শ নিন।</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title">🇧🇩 বাংলাদেশ মেডিকেল ও ড্রাগ অ্যাসিস্ট্যান্ট</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">ক্লিনিক্যাল স্মৃতি এবং ভেরিফাইড তথ্যের সাথে ইন্টারঅ্যাক্টিভ মেডিকেল চ্যাট।</div>', unsafe_allow_html=True)
 else:
-    st.markdown('<div class="main-title">🇧🇩 Bangladesh Medical & First Aid Assistant</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">AI First-Aid Guidance & Multimodal Vision for Medicine Packaging, Prescriptions, Burns, Dengue, and Injuries.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title">🇧🇩 Bangladesh Medical & Drug Assistant</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Conversational clinical guidance with context memory, strict grounding, and safety guardrails.</div>', unsafe_allow_html=True)
 
 
-# ── Tabs ───────────────────────────────────────────────────────────────
+# ── Navigation Tabs ────────────────────────────────────────────────────
 
 tab1, tab2, tab3 = st.tabs([
-    "💬 First Aid & Multimodal Assistant" if not is_bengali else "💬 প্রাথমিক চিকিৎসা ও ছবি বিশ্লেষণ",
+    "💬 Medical Assistant (Chat)" if not is_bengali else "💬 মেডিকেল সহকারী (চ্যাট)",
     "💊 Bangladesh Medicine Directory" if not is_bengali else "💊 স্থানীয় ওষুধের তালিকা (ব্র্যান্ড)",
     "🚑 Emergency Protocols & Hospitals" if not is_bengali else "🚑 জরুরি প্রোটোকল ও হাসপাতাল",
 ])
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# TAB 1: Multimodal Assistant (Text + Image)
+# TAB 1: Conversational Medical Assistant
 # ═══════════════════════════════════════════════════════════════════════
 
 with tab1:
-    # Initialize query in session state
-    if "user_medical_query" not in st.session_state:
-        st.session_state["user_medical_query"] = ""
-
-    def set_active_query(q_text: str) -> None:
-        st.session_state["user_medical_query"] = q_text
-
-    # Quick Topics Chips
-    st.markdown("**Quick Topics / দ্রুত বিষয় নির্বাচন করুন:**")
-    q_cols = st.columns(7)
-    quick_queries = [
-        ("Dengue Care", "What is the first aid and medicine for Dengue fever?", "ডেঙ্গু জ্বর ও নাপা"),
-        ("Burns First Aid", "What should I immediately do for hot water burn?", "আগুনে পোড়ার প্রাথমিক চিকিৎসা"),
-        ("Snakebite Protocol", "First aid steps for snakebite in Bangladesh", "সাপের কামড় দিলে কী করবেন?"),
-        ("Broken Bone", "How to fix a broken bone or fracture? Immediate first aid", "হাড় ভেঙে গেলে বা মচকে গেলে প্রাথমিক চিকিৎসা"),
-        ("ORS / Diarrhea", "How to prepare Orsaline-N properly for diarrhea?", "খাবার স্যালাইন বানানোর সঠিক নিয়ম"),
-        ("Napa Dosage", "What is the maximum daily dose of Napa (paracetamol)?", "নাপা ৫০০ খাওয়ার সঠিক ডোজ কত?"),
-        ("Cut & Bleeding", "How to stop heavy bleeding from a cut wound?", "রক্তপাত বন্ধ করার প্রাথমিক চিকিৎসা"),
+    # Quick Action Chips
+    st.markdown("**Quick Topics / দ্রুত প্রশ্ন শুরু করুন:**")
+    q_cols = st.columns(6)
+    quick_topics = [
+        ("💊 What is Napa?", "What is Napa and what is its generic?"),
+        ("🔄 Alternatives to Napa", "What are Bangladeshi brand alternatives for Napa?"),
+        ("📋 Metformin Dosage", "What is the recommended dosage for metformin?"),
+        ("⚠️ Atorvastatin Risks", "What are the common side effects of atorvastatin?"),
+        ("🤰 Pregnancy & Seclo", "Can a pregnant woman take Seclo (omeprazole)?"),
+        ("🚑 Snakebite First Aid", "Immediate first aid steps for snakebite in Bangladesh"),
     ]
 
-    for idx, (label, en_q, bn_q) in enumerate(quick_queries):
-        btn_text = bn_q if is_bengali else label
-        target_q = bn_q if is_bengali else en_q
-        q_cols[idx].button(
-            btn_text,
-            use_container_width=True,
-            key=f"quick_btn_{idx}",
-            on_click=set_active_query,
-            args=(target_q,),
-        )
+    for idx, (label, prompt_text) in enumerate(quick_topics):
+        if q_cols[idx].button(label, use_container_width=True, key=f"chip_{idx}"):
+            st.session_state["pending_query"] = prompt_text
 
-    # Form to guarantee input submission without race conditions
-    with st.form("medical_consult_form", clear_on_submit=False):
-        col_input, col_media = st.columns([1.6, 1.0])
-
-        with col_input:
-            user_query = st.text_area(
-                "Enter your medical or first-aid question:" if not is_bengali else "আপনার প্রশ্ন বা ওষুধের নাম লিখুন:",
-                key="user_medical_query",
-                placeholder="e.g. How to fix a broken bone? Can I take Napa for dengue? How to treat hot water burn?",
-                height=130,
+    # Active Context Banner
+    if st.session_state.get("active_drug"):
+        c_col1, c_col2 = st.columns([0.85, 0.15])
+        with c_col1:
+            st.markdown(
+                f"""
+                <div class="context-focus-bar">
+                    <span>📌 <strong>Active Medicine Focus:</strong> <code>{st.session_state['active_drug'].title()}</code> (Follow-ups like <em>"can I take this with..."</em> or <em>"side effects"</em> will resolve to this medicine)</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
+        with c_col2:
+            if st.button("✕ Clear Focus", key="clear_drug_focus", use_container_width=True):
+                st.session_state["active_drug"] = None
+                st.rerun()
 
-        with col_media:
-            st.markdown("**📷 Upload Image (Optional / ঐচ্ছিক):**")
-            uploaded_file = st.file_uploader(
-                "Medicine strip, prescription, or injury image:",
-                type=["png", "jpg", "jpeg", "webp"],
-                key="uploaded_medical_img",
-                help="Upload a photo of a medicine strip, doctor prescription, burn, or wound.",
-            )
-
-        submit_button = st.form_submit_button(
-            "🚀 Get Instant Guidance" if not is_bengali else "🚀 তাৎক্ষণিক পরামর্শ নিন",
-            type="primary",
-            use_container_width=True,
+    # Optional Image Attachment Expander
+    uploaded_image_file = None
+    with st.expander("📷 Upload Medicine Packaging / Blister Pack / Prescription (Optional / ঐচ্ছিক)"):
+        uploaded_image_file = st.file_uploader(
+            "Upload image for OCR & visual identification:",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="chat_img_uploader",
+            help="Upload a photo of a medicine blister strip, bottle, or prescription.",
         )
+        if uploaded_image_file:
+            st.image(uploaded_image_file, caption="Attached Medicine Packaging Photo", width=320)
 
-    # Optional image display
-    pil_image = None
-    if uploaded_file is not None:
-        try:
-            pil_image = Image.open(uploaded_file)
-            st.image(pil_image, caption="Uploaded Medical Image", use_container_width=True)
-        except Exception as e:
-            st.error(f"Error loading image: {e}")
-
-    # Process Query on Submit
-    if submit_button:
-        active_text = user_query.strip()
-        if not active_text and pil_image is None:
-            st.warning("Please enter a question or upload an image." if not is_bengali else "দয়া করে একটি প্রশ্ন লিখুন অথবা ছবি আপলোড করুন।")
-        else:
-            with st.spinner("Analyzing clinical data & first-aid guidelines..." if not is_bengali else "চিকিৎসা ও প্রাথমিক সহায়তার তথ্য বিশ্লেষণ করা হচ্ছে..."):
-                active_key = st.session_state.get("user_gemini_key", "").strip() or GEMINI_API_KEY
-                multimodal_assistant = get_cached_multimodal_assistant(active_key)
-                has_image = pil_image is not None
-                bd_match = lookup_bangladesh_brand(active_text)
-                firstaid_match = find_first_aid_protocol(active_text)
-                fda_drugs = detect_drugs_in_query(active_text)
-
-                # Routing:
-                # 1. If image uploaded OR Bangladesh brand matched OR first-aid protocol matched OR query is Bengali OR no FDA drug is named:
-                #    Route to Multimodal Assistant for safe clinical triage & Bangladesh guidance.
-                # 2. If specific FDA drug mentioned with no image or first aid protocol:
-                #    Route to FDA Label RAG engine.
-                if has_image or bd_match or firstaid_match or is_bengali or not fda_drugs:
-                    analysis = multimodal_assistant.analyze(
-                        prompt=active_text,
-                        image=pil_image,
-                        language=lang_code,
+    # Render Conversation Messages
+    for msg in st.session_state["messages"]:
+        with st.chat_message(msg["role"]):
+            # Display Safety Alerts if present
+            if msg.get("safety_alerts"):
+                for alert in msg["safety_alerts"]:
+                    a_class = "alert-emergency" if alert.alert_type == "EMERGENCY" else (
+                        "alert-pregnancy" if alert.alert_type == "PREGNANCY" else "alert-pediatric"
                     )
-                    st.session_state["latest_result"] = {
-                        "type": "multimodal",
-                        "data": analysis,
-                        "query": active_text,
-                    }
-                else:
-                    engine = get_cached_answer_engine(active_key)
-                    res = engine.answer_question(active_text)
-                    st.session_state["latest_result"] = {
-                        "type": "rag",
-                        "data": res,
-                        "query": active_text,
-                    }
+                    hl_links = " | ".join([f"<strong>📞 {h}</strong>" for h in alert.hotlines]) if alert.hotlines else ""
+                    st.markdown(
+                        f"""
+                        <div class="safety-alert-card {a_class}">
+                            <strong>{alert.title}</strong><br/>
+                            {alert.message}
+                            {f'<br/><span style="margin-top: 6px; display: inline-block;">Hotlines: {hl_links}</span>' if hl_links else ''}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
-    # Render persisted result so it stays on screen
-    if "latest_result" in st.session_state:
-        res_info = st.session_state["latest_result"]
-        st.markdown("---")
-        st.markdown(f"**Question / জিজ্ঞাসা:** `{res_info['query']}`")
+            # Display Query Type & Confidence Badges for Assistant
+            if msg["role"] == "assistant" and msg.get("query_type") not in ("welcome", None):
+                q_type = msg.get("query_type", "general")
+                conf = msg.get("confidence", "high")
 
-        if res_info["type"] == "multimodal":
-            analysis = res_info["data"]
-            st.markdown("### 📋 Analysis & Guidance" if not is_bengali else "### 📋 তাৎক্ষণিক চিকিৎসা ও প্রাথমিক পরামর্শ")
-            if analysis.emergency_level == "EMERGENCY":
-                st.markdown(
-                    """
-                    <div class="review-notice" style="background-color: #FEE2E2; border-color: #DC2626; color: #991B1B;">
-                        🚨 <strong>CRITICAL EMERGENCY ALERT (জরুরি সতর্কতা)</strong>: This condition requires immediate professional emergency care. Call <strong>999</strong> for an ambulance or rush to the nearest emergency hospital.
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+                # Type badge
+                type_labels = {
+                    "identify": "💊 Medicine Identification",
+                    "dosage": "📋 Dosage & Administration",
+                    "side_effects": "⚠️ Adverse Effects & Warnings",
+                    "interactions": "🔄 Drug Interactions",
+                    "alternatives": "🔄 Bangladeshi Brand Alternatives",
+                    "first_aid": "🚑 First-Aid Protocol",
+                    "rag": "📚 FDA Label RAG",
+                }
+                type_badge = type_labels.get(q_type.split("_")[0], "📚 Clinical Information")
+                st.markdown(f'<span class="badge-pill badge-intent">{type_badge}</span>', unsafe_allow_html=True)
+
+                # Confidence badge
+                if conf == "high":
+                    st.markdown('<span class="badge-pill badge-high">🟢 Grounded in Labeling</span>', unsafe_allow_html=True)
+                elif conf == "medium":
+                    st.markdown('<span class="badge-pill badge-medium">🟡 Moderate Match</span>', unsafe_allow_html=True)
+                elif conf == "abstained":
+                    st.markdown('<span class="badge-pill badge-low">🔴 Abstained (Strict Grounding)</span>', unsafe_allow_html=True)
+
+            # Main content text
+            st.markdown(msg["content"])
+
+            # Sources Drawer
+            if msg.get("sources"):
+                with st.expander(f"📚 Verified Sources & Package Inserts ({len(msg['sources'])})"):
+                    for s in msg["sources"]:
+                        st.markdown(f"- **{s.get('title', 'Official Label')}** — [View Source Link]({s.get('url', 'https://dailymed.nlm.nih.gov')})")
+
+            # Evidence Chunks Drawer (Strict Grounding Inspection)
+            if msg.get("retrieved_chunks"):
+                with st.expander(f"🔬 Inspect RAG Evidence Passages ({len(msg['retrieved_chunks'])})"):
+                    st.caption("These context passages were retrieved from ChromaDB + BM25 to answer your question strictly without fabrication:")
+                    for i, ch in enumerate(msg["retrieved_chunks"], 1):
+                        st.markdown(f"**Passage #{i}** — `{ch.get('drug', '').title()}` | Section: `{ch.get('section', '')}` | **Similarity:** `{ch.get('similarity', 0.0)}`")
+                        st.text(ch.get("text", "")[:400] + "...")
+
+    # Chat Input Bar & Execution
+    chat_prompt = st.chat_input(
+        "Ask a question, follow-up, or drug inquiry (e.g. 'Can I take this with paracetamol?')..."
+        if not is_bengali
+        else "ওষুধ বা প্রাথমিক চিকিৎসা বিষয়ক প্রশ্ন লিখুন (যেমনঃ 'নাপা খাওয়ার নিয়ম কী?')..."
+    )
+
+    # Handle pending query from quick topic chips
+    if st.session_state.get("pending_query"):
+        chat_prompt = st.session_state["pending_query"]
+        st.session_state["pending_query"] = None
+
+    if chat_prompt:
+        # Load attached image if provided
+        pil_img = None
+        if uploaded_image_file is not None:
+            try:
+                pil_img = Image.open(uploaded_image_file)
+            except Exception:
+                pil_img = None
+
+        # Add user message to state and display
+        st.session_state["messages"].append({"role": "user", "content": chat_prompt})
+        with st.chat_message("user"):
+            st.markdown(chat_prompt)
+            if pil_img is not None:
+                st.image(pil_img, caption="Attached Packaging Image", width=240)
+
+        # Process Turn with Conversational Medical Assistant
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing clinical labeling & local protocols..." if not is_bengali else "চিকিৎসা ও ওষুধের তথ্য বিশ্লেষণ করা হচ্ছে..."):
+                assistant = get_cached_chat_assistant(active_key)
+                
+                # Prepare conversation history for antecedent resolution
+                conv_history = []
+                for m in st.session_state["messages"]:
+                    if m.get("role") == "user":
+                        conv_history.append({"user": m["content"]})
+                    elif m.get("role") == "assistant":
+                        if conv_history:
+                            conv_history[-1]["active_drug"] = m.get("active_drug")
+                            conv_history[-1]["reply"] = m["content"]
+
+                response: ChatTurnResponse = assistant.respond(
+                    user_message=chat_prompt,
+                    image=pil_img,
+                    conversation_history=conv_history,
+                    language=lang_code,
                 )
-            elif analysis.emergency_level == "WARNING":
-                st.markdown(
-                    """
-                    <div class="review-notice" style="background-color: #FEF9C3; border-color: #CA8A04; color: #854D0E;">
-                        ⚠️ <strong>CLINICAL WARNING (চিকিৎসা সতর্কতা)</strong>: Follow first-aid steps carefully and seek clinical evaluation at a healthcare facility if symptoms persist or worsen.
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
 
-            st.markdown(analysis.text)
+                # Update active drug context in session state
+                if response.active_drug:
+                    st.session_state["active_drug"] = response.active_drug
 
-            if getattr(analysis, "is_live_gemini", False):
-                st.caption("🤖 *Generated live by Google Gemini 2.0 Flash Multimodal Vision*")
-            else:
-                st.caption("🤖 *Generated locally by Qwen 2.5 open-source neural LLM (100% offline, zero API keys).*")
+                # Store assistant response in history
+                st.session_state["messages"].append({
+                    "role": "assistant",
+                    "content": response.reply_text,
+                    "confidence": response.confidence,
+                    "sources": response.sources,
+                    "safety_alerts": response.safety_alerts,
+                    "active_drug": response.active_drug,
+                    "query_type": response.query_type,
+                    "retrieved_chunks": response.retrieved_chunks,
+                })
 
-        elif res_info["type"] == "rag":
-            res = res_info["data"]
-            st.markdown("### 📋 Clinical Drug Information" if not is_bengali else "### 📋 ওষুধের অফিসিয়াল তথ্য")
-
-            # Confidence Badge
-            if res.confidence == "high":
-                badge_html = '<span class="badge-high">🟢 High Confidence</span>'
-            elif res.confidence == "medium":
-                badge_html = '<span class="badge-medium">🟡 Medium Confidence</span>'
-            else:
-                badge_html = '<span class="badge-low">🔴 Low Confidence (Abstained)</span>'
-
-            st.markdown(badge_html, unsafe_allow_html=True)
-            st.markdown(f"> {res.answer}")
-            st.caption("🤖 *Answer synthesized live by SmolLM-135M neural language model using retrieved FDA label context (Zero GPU, Zero API keys).*")
-
-
-
-            # RAG Inspection View
-            if hasattr(res, "retrieved_chunks") and res.retrieved_chunks:
-                with st.expander(f"🔬 Inspect RAG Pipeline: Retrieved Context Chunks ({len(res.retrieved_chunks)}) & Similarity Scores"):
-                    st.caption("The RAG engine retrieved these context passages from ChromaDB + BM25 and fed them into the LLM:")
-                    for i, ch in enumerate(res.retrieved_chunks, 1):
-                        st.markdown(f"**Chunk #{i}** — `{ch['drug'].title()}` | Section: `{ch['section']}` | **Cosine Similarity:** `{ch.get('similarity', 0.0)}`")
-                        st.text(ch['text'])
-
-            if res.sources:
-                with st.expander(f"📚 Verified Sources & Package Inserts ({len(res.sources)})"):
-                    for s in res.sources:
-                        st.markdown(f"- **{s.drug.title()}** | Section: `{s.section}` — [View DailyMed Link]({s.url})")
+                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -406,13 +478,13 @@ with tab1:
 
 with tab2:
     st.markdown("### 🔍 Search Common Bangladeshi Medicines (জনপ্রিয় ওষুধ অনুসন্ধান)")
-    search_term = st.text_input("Type a brand name (e.g. Napa, Seclo, Sergel, Alatrol, Zimax, Monas):", "")
+    search_term = st.text_input("Type a brand or generic name (e.g. Napa, Seclo, Sergel, Alatrol, Zimax, Monas):", "")
 
-    filtered_brands = BANGLADESH_BRANDS.items()
+    filtered_brands = list(BANGLADESH_BRANDS.items())
     if search_term.strip():
         term = search_term.lower()
         filtered_brands = [
-            (k, v) for k, v in BANGLADESH_BRANDS.items()
+            (k, v) for k, v in filtered_brands
             if term in k or term in v.generic_name.lower() or term in v.manufacturer.lower()
         ]
 
@@ -429,6 +501,13 @@ with tab2:
                 st.markdown(f"**বাংলায় ব্যবহার**: {info.bengali_uses}")
                 if info.warning:
                     st.warning(f"⚠️ {info.warning}")
+
+            # Show Alternatives Button
+            alts = find_brand_alternatives(info.generic_name)
+            if alts and len(alts) > 1:
+                st.markdown(f"**Available Bangladeshi Alternatives ({len(alts)-1}):**")
+                alt_names = [f"**{a.brand_name}** ({a.manufacturer})" for a in alts if a.brand_name.lower() != info.brand_name.lower()]
+                st.markdown(" • ".join(alt_names))
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -473,7 +552,7 @@ with tab3:
 st.markdown("---")
 st.caption(
     "⚠️ **Medical Disclaimer (দায়মুক্তি বিবৃতি)**: "
-    "This tool provides first-aid reference and pharmaceutical information strictly for educational and triage awareness in Bangladesh. "
+    "This tool provides pharmaceutical information and first-aid triage awareness strictly for educational purposes in Bangladesh. "
     "It is NOT a substitute for formal clinical diagnosis or treatment by a BMDC (Bangladesh Medical & Dental Council) registered physician. "
-    "In acute life-threatening emergencies, immediately dial **999** for emergency ambulance services or visit the nearest government health complex."
+    "In acute life-threatening emergencies, immediately dial **999** for emergency ambulance services or visit the nearest government hospital."
 )

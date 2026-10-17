@@ -529,9 +529,9 @@ def is_emergency_query(query: str) -> tuple[bool, str]:
     emergency_patterns = [
         (r"\b(snake\s*bite|সাপের\s*কামড়|বিষধর|russell's\s*viper|কালো\s*সাপ)\b", "snakebite"),
         (r"\b(chest\s*pain|heart\s*attack|বুকে\s*ব্যথা|হার্ট\s*অ্যাটাক|দম\s*বন্ধ)\b", "cardiac"),
-        (r"\b(unconscious|fainted|অজ্ঞান|জ্ঞান\s*হারানো|পড়ে\s*গেছে)\b", "unconscious"),
+        (r"\b(unconscious|fainted|unresponsive|অজ্ঞান|জ্ঞান\s*হারানো|পড়ে\s*গেছে|অচেতন)\b", "unconscious"),
         (r"\b(severe\s*burn|আগুনে\s*পুড়ে|third\s*degree\s*burn|বিদ্যুৎস্পৃষ্ট|electrocution)\b", "severe_burn"),
-        (r"\b(dengue\s*bleeding|প্লাটিলেট\s*কমে|রক্তক্ষরণ|কালো\s*পায়খানা|dengue\s*shock)\b", "dengue_severe"),
+        (r"\b(dengue\s*bleeding|প্লাটিলেট\s*কমে|রক্তক্ষরণ|কালো\s*পায়খানা|dengue\s*shock|bleeding\s*heavily|massive\s*bleeding|hemorrhage|প্রচুর\s*রক্তপাত)\b", "severe_bleeding"),
         (r"\b(severe\s*choking|গলায়\s*আটকে|দম\s*নিতে\s*পারছে\s*না)\b", "choking"),
         (r"\b(poison|বিষ\s*খেয়েছে|কীটনাশক|হারপিক|bleach\s*poisoning)\b", "poisoning"),
     ]
@@ -539,3 +539,39 @@ def is_emergency_query(query: str) -> tuple[bool, str]:
         if re.search(pattern, q_lower):
             return True, reason
     return False, ""
+
+
+def find_brand_alternatives(brand_or_generic: str) -> list[BangladeshDrugInfo]:
+    """Find all alternative Bangladeshi pharmaceutical brands sharing the same generic molecule."""
+    q_clean = brand_or_generic.strip().lower()
+    target_generic = None
+
+    # Check if query directly matches a brand
+    info = lookup_bangladesh_brand(q_clean)
+    if info:
+        target_generic = info.generic_name.lower()
+    else:
+        # Check canonical mapping
+        canonical = get_canonical_generic_from_local_query(q_clean)
+        if canonical:
+            target_generic = canonical.lower()
+        else:
+            # Check if query itself is generic name
+            for drug in BANGLADESH_BRANDS.values():
+                if drug.generic_name.lower() == q_clean:
+                    target_generic = q_clean
+                    break
+
+    if not target_generic:
+        return []
+
+    alternatives: list[BangladeshDrugInfo] = []
+    seen_brands: set[str] = set()
+
+    for brand_key, drug in BANGLADESH_BRANDS.items():
+        if drug.generic_name.lower() == target_generic and drug.brand_name.lower() not in seen_brands:
+            seen_brands.add(drug.brand_name.lower())
+            alternatives.append(drug)
+
+    return alternatives
+
