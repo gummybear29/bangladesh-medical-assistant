@@ -60,6 +60,15 @@ def test_brand_identification_intent(mock_assistant: ConversationalMedicalAssist
     assert res.active_drug == "paracetamol"
 
 
+def test_bengali_brand_identification_seclo(mock_assistant: ConversationalMedicalAssistant) -> None:
+    res = mock_assistant.respond("Seclo কী ওষুধ? এর জেনেরিক নাম কী?")
+    assert res.query_type == "identify"
+    assert res.confidence == "high"
+    assert "ওমিপ্রাজল" in res.reply_text
+    assert "Omeprazole" in res.reply_text
+    assert res.active_drug == "omeprazole"
+
+
 def test_first_aid_intent(mock_assistant: ConversationalMedicalAssistant) -> None:
     res = mock_assistant.respond("What is the first aid for snakebite?")
     assert res.query_type == "first_aid"

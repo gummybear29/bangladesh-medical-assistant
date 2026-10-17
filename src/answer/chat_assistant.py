@@ -160,6 +160,15 @@ class ConversationalMedicalAssistant:
         resolved_query, active_drug = self.resolve_conversation_context(combined_input, history)
         q_lower = resolved_query.lower()
 
+        # Detect if input is in Bengali
+        has_bengali_script = bool(re.search(r"[\u0980-\u09FF]", user_message))
+        effective_lang = "bn" if (has_bengali_script or language == "bn") else "en"
+
+        # Check specific clinical sub-intents
+        is_dosage_intent = any(w in q_lower for w in ["dosage", "dose", "how much", "how many", "how often", "frequency", "ডোজ", "মাত্রা", "কতটুকু", "mg", "milligram", "খাওয়ার নিয়ম"])
+        is_side_effects_intent = any(w in q_lower for w in ["side effect", "adverse", "risk", "harm", "reaction", "contraindication", "danger", "পার্শ্বপ্রতিক্রিয়া", "ক্ষতি", "ঝুঁকি", "ভয়", "সমস্যা"])
+        is_interactions_intent = any(w in q_lower for w in ["interaction", "take with", "together with", "with", "mix", "একসাথে", "মিশিয়ে", "খাওয়া যাবে", "খাওয়া যায়"])
+
         # 3. Intent Detection: Bangladeshi Brand Alternatives
         is_alternative_intent = bool(re.search(r"\b(alternative|alternatives|substitute|substitutes|other brands?|বিকল্প|অন্য ব্র্যান্ড)\b", q_lower))
         if is_alternative_intent and active_drug:
@@ -172,7 +181,7 @@ class ConversationalMedicalAssistant:
                     alt_lines.append(f"- **{alt.brand_name}** ({alt.strength}, {alt.dosage_form}) — *{alt.manufacturer}* | `{otc_text}`")
                 
                 alt_list_str = "\n".join(alt_lines)
-                if language == "bn":
+                if effective_lang == "bn":
                     reply = (
                         f"### 💊 বাংলাদেশে **{active_drug.title()}** ({target_generic})-এর সমমানের ব্র্যান্ডসমূহ:\n\n"
                         f"এদের সবার মূল সক্রিয় উপাদান একই ({target_generic}):\n\n"
@@ -197,10 +206,12 @@ class ConversationalMedicalAssistant:
 
         # 4. Intent Detection: Brand Identification / Packaging Query
         bd_brand = lookup_bangladesh_brand(combined_input)
-        if bd_brand and ("identify" in q_lower or "what is" in q_lower or extracted_ocr or "পরিচয়" in q_lower):
+        is_id_inquiry = any(w in q_lower for w in ["identify", "what is", "generic", "কার ওষুধ", "কী ওষুধ", "কি ওষুধ", "কিসের", "কাজ কি", "কাজ কী", "জেনেরিক", "পরিচয়", "ব্যবহার", "বিস্তারিত", "ঔষধ"]) or extracted_ocr
+        if bd_brand and (is_id_inquiry or (not is_dosage_intent and not is_side_effects_intent and not is_interactions_intent)):
             active_drug = bd_brand.generic_name
             ocr_note = f"> 📷 *OCR identified text from packaging*: `{extracted_ocr[:90]}`\n\n" if extracted_ocr else ""
-            if language == "bn":
+            if effective_lang == "bn":
+                otc_str = "ওটিসি (প্রেসক্রিপশন ছাড়া পাওয়া যায়)" if bd_brand.otc else "প্রেসক্রিপশন আবশ্যক (ডাক্তারের পরামর্শ অনুযায়ী সেব্য)"
                 reply = (
                     f"{ocr_note}"
                     f"### 💊 ওষুধ পরিচিতি: **{bd_brand.brand_name}**\n\n"
@@ -208,24 +219,27 @@ class ConversationalMedicalAssistant:
                     f"- **প্রস্তুতকারক**: {bd_brand.manufacturer} (বাংলাদেশ)\n"
                     f"- **মাত্রা ও ফর্ম**: {bd_brand.strength} ({bd_brand.dosage_form})\n"
                     f"- **প্রধান ব্যবহার**: {bd_brand.bengali_uses}\n"
-                    f"- **সতর্কতা**: {bd_brand.warning or 'প্যাকেজের নির্দেশিকা অথবা ডাক্তারের পরামর্শ মেনে চলুন।'}\n\n"
+                    f"- **খাওয়ার নিয়ম / সতর্কতা**: {bd_brand.warning or 'প্যাকেজের নির্দেশিকা অথবা ডাক্তারের পরামর্শ মেনে চলুন।'}\n"
+                    f"- **শ্রেণী**: {otc_str}\n\n"
                     f"⚠️ *জরুরি স্বাস্থ্য প্রয়োজনে কল করুন: ১৬২৬৩ (স্বাস্থ্য বাতায়ন)*"
                 )
             else:
+                otc_str = "Over The Counter (OTC)" if bd_brand.otc else "Prescription Only"
                 reply = (
                     f"{ocr_note}"
                     f"### 💊 Medicine Identification: **{bd_brand.brand_name}**\n\n"
-                    f"- **Active Molecule**: {bd_brand.generic_name.title()} ({bd_brand.bengali_generic})\n"
+                    f"- **Active Molecule (Generic)**: {bd_brand.generic_name.title()} ({bd_brand.bengali_generic})\n"
                     f"- **Manufacturer**: {bd_brand.manufacturer} (Bangladesh)\n"
                     f"- **Strength & Form**: {bd_brand.strength} ({bd_brand.dosage_form})\n"
                     f"- **Common Indications**: {bd_brand.common_uses}\n"
-                    f"- **Clinical Precaution**: {bd_brand.warning or 'Follow registered physician instructions.'}\n\n"
+                    f"- **Clinical Precaution**: {bd_brand.warning or 'Follow registered physician instructions.'}\n"
+                    f"- **Classification**: {otc_str}\n\n"
                     f"⚠️ *For 24/7 National Health Consultation in Bangladesh, dial 16263.*"
                 )
             return ChatTurnResponse(
                 reply_text=reply,
                 confidence="high",
-                sources=[{"title": f"DGDA / Brand Insert ({bd_brand.brand_name})", "url": "https://dgda.gov.bd"}],
+                sources=[{"title": f"DGDA Bangladesh National Formulary ({bd_brand.brand_name})", "url": "https://dgda.gov.bd"}],
                 safety_alerts=safety_alerts,
                 active_drug=active_drug,
                 query_type="identify",
@@ -269,29 +283,43 @@ class ConversationalMedicalAssistant:
 
         # 6. Specific clinical query classification
         clinical_intent = "rag"
-        if any(w in q_lower for w in ["dosage", "dose", "how much", "how many", "how often", "frequency", "ডোজ", "মাত্রা", "কতটুকু", "mg", "milligram"]):
+        if is_dosage_intent:
             clinical_intent = "dosage"
-        elif any(w in q_lower for w in ["side effect", "adverse", "risk", "harm", "reaction", "contraindication", "danger", "পার্শ্বপ্রতিক্রিয়া", "ক্ষতি", "ঝুঁকি"]):
+        elif is_side_effects_intent:
             clinical_intent = "side_effects"
-        elif any(w in q_lower for w in ["interaction", "take with", "together with", "with", "mix", "একসাথে", "মিশিয়ে"]):
+        elif is_interactions_intent:
             clinical_intent = "interactions"
 
+        # Formulate optimal English clinical query for FDA label retrieval
+        clinical_search_query = resolved_query
+        if active_drug:
+            if clinical_intent == "dosage":
+                clinical_search_query = f"{active_drug} dosage and administration recommended dose"
+            elif clinical_intent == "side_effects":
+                clinical_search_query = f"{active_drug} adverse reactions side effects warnings"
+            elif clinical_intent == "interactions":
+                other_drugs = [d for d in detect_drugs_in_query(combined_input) if d != active_drug]
+                other_str = f" {other_drugs[0]}" if other_drugs else ""
+                clinical_search_query = f"{active_drug}{other_str} drug interactions concomitant use"
+            elif has_bengali_script:
+                clinical_search_query = f"{active_drug} indications and usage"
+
         # Strict RAG Pipeline for Drug Label Queries
-        rag_res: AnswerResult = self.engine.answer_question(resolved_query)
+        rag_res: AnswerResult = self.engine.answer_question(clinical_search_query)
 
         # Strict Grounding Check: If abstained or score is low
         if rag_res.abstained or rag_res.confidence == "low":
-            if language == "bn":
+            if effective_lang == "bn":
                 not_found_msg = (
                     f"⚠️ **অফিসিয়াল লেবেলিংয়ে তথ্য পাওয়া যায়নি (Not Found in Official Labeling)**\n\n"
-                    f"আপনার প্রশ্ন: *\"{resolved_query}\"*\n\n"
+                    f"আপনার প্রশ্ন: *\"{user_message}\"*\n\n"
                     f"কঠোর রোগী নিরাপত্তার স্বার্থে, অফিসিয়াল এফডিএ (FDA) ওষুধ প্যাকেজ নির্দেশিকায় সুনির্দিষ্ট তথ্য না থাকলে এই সিস্টেম কোনো অনুমানভিত্তিক উত্তর প্রদান করে না। "
                     f"সঠিক নির্দেশনা ও প্রেসক্রিপশনের জন্য অনুগ্রহ করে বিএমডিসি (BMDC) নিবন্ধিত চিকিৎসকের পরামর্শ নিন বা ১৬২৬৩ নম্বরে কল করুন।"
                 )
             else:
                 not_found_msg = (
                     f"⚠️ **Information Not Found in Official Drug Labeling**\n\n"
-                    f"Query evaluated: *\"{resolved_query}\"*\n\n"
+                    f"Query evaluated: *\"{user_message}\"*\n\n"
                     f"Under strict clinical grounding rules, this assistant abstains when facts cannot be verified directly from official package inserts. "
                     f"To prevent harmful hallucinations, no unstated details are fabricated. Please consult a registered physician or pharmacist for medical advice."
                 )
@@ -313,8 +341,17 @@ class ConversationalMedicalAssistant:
                 "url": s.url or "https://dailymed.nlm.nih.gov",
             })
 
+        if effective_lang == "bn":
+            reply_body = (
+                f"### 📋 অফিসিয়াল ড্রাগ নির্দেশিকা তথ্য ({active_drug.title() if active_drug else ''}):\n\n"
+                f"{rag_res.answer}\n\n"
+                f"⚠️ *সঠিক চিকিৎসা ও নির্দেশনার জন্য রেজিস্টার্ড চিকিৎসকের পরামর্শ নিন।* (জরুরি সেবা: ১৬২৬৩)"
+            )
+        else:
+            reply_body = rag_res.answer
+
         return ChatTurnResponse(
-            reply_text=rag_res.answer,
+            reply_text=reply_body,
             confidence=rag_res.confidence,
             sources=formatted_sources,
             safety_alerts=safety_alerts,

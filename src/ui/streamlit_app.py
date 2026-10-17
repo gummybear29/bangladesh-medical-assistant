@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 # Ensure project root is in sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -240,6 +240,13 @@ with st.sidebar:
             st.session_state["user_gemini_key"] = custom_key
             st.rerun()
 
+    with st.expander("🛠️ Developer Options"):
+        st.session_state["show_dev_chunks"] = st.checkbox(
+            "Show Raw RAG Vector Passages",
+            value=st.session_state.get("show_dev_chunks", False),
+            help="Displays retrieved passages and similarity scores for debugging.",
+        )
+
     st.markdown("---")
     if st.button("🗑️ Reset Chat / নতুন কথোপকথন", use_container_width=True):
         st.session_state["messages"] = [
@@ -395,13 +402,12 @@ with tab1:
                     for s in msg["sources"]:
                         st.markdown(f"- **{s.get('title', 'Official Label')}** — [View Source Link]({s.get('url', 'https://dailymed.nlm.nih.gov')})")
 
-            # Evidence Chunks Drawer (Strict Grounding Inspection)
-            if msg.get("retrieved_chunks"):
-                with st.expander(f"🔬 Inspect RAG Evidence Passages ({len(msg['retrieved_chunks'])})"):
-                    st.caption("These context passages were retrieved from ChromaDB + BM25 to answer your question strictly without fabrication:")
+            # Developer debug drawer (only if enabled in sidebar)
+            if st.session_state.get("show_dev_chunks", False) and msg.get("retrieved_chunks"):
+                with st.expander(f"🔬 Developer Inspection: Raw Vector Chunks ({len(msg['retrieved_chunks'])})"):
                     for i, ch in enumerate(msg["retrieved_chunks"], 1):
                         st.markdown(f"**Passage #{i}** — `{ch.get('drug', '').title()}` | Section: `{ch.get('section', '')}` | **Similarity:** `{ch.get('similarity', 0.0)}`")
-                        st.text(ch.get("text", "")[:400] + "...")
+                        st.text(ch.get("text", "")[:300] + "...")
 
     # Chat Input Bar & Execution
     chat_prompt = st.chat_input(
