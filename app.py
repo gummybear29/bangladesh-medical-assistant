@@ -82,6 +82,7 @@ def get_answer_engine():
     return answer_engine
 
 
+@spaces.GPU
 def consult_assistant(
     question: str,
     image: Image.Image | None,
